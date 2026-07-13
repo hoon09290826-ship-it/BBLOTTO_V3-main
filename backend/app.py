@@ -2098,7 +2098,7 @@ def app_js():
 
 @app.get('/api/ui-health')
 def ui_health():
-    return {'ok': True, 'version': 'STABLE-CORE-1', 'event_owner': 'app.js', 'fallback_file': None, 'single_event_owner': True}
+    return {'ok': True, 'version': 'STABLE-CORE-SAME-NUMBER-SAVE', 'event_owner': 'app.js', 'fallback_file': None, 'single_event_owner': True}
 
 @app.get('/login.js')
 def login_js():
