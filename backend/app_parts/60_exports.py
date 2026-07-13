@@ -137,7 +137,7 @@ def export_final_bundle(token: str|None=None, authorization: str|None = Header(d
         z.writestr('members.json',json.dumps([dict(x) for x in members],ensure_ascii=False,indent=2))
         z.writestr('recommendations.json',json.dumps([dict(x) for x in recs],ensure_ascii=False,indent=2))
         z.writestr('winning_checks.json',json.dumps([dict(x) for x in wins],ensure_ascii=False,indent=2))
-        if DB.exists(): z.write(DB, 'database/lotto.db')
+        if DB.exists(): z.write(DB, 'database/bblotto_v34.db')
     bio.seek(0)
     return StreamingResponse(bio, media_type='application/zip', headers={'Content-Disposition':'attachment; filename=BBLOTTO_PRO_V34_FINAL_EXPORT_BUNDLE.zip'})
 

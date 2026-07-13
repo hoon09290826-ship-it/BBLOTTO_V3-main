@@ -132,9 +132,9 @@ def _rc39_backup_files(limit: int = 20):
 
 def _rc39_database_candidates():
     candidates = []
-    for rel in ['database/bblotto_v34.db', 'database/lotto.db']:
-        f = BASE / rel
-        candidates.append({'path': rel, 'exists': f.exists(), 'size_bytes': f.stat().st_size if f.exists() else 0, 'primary': str(f.resolve()) == str(DB.resolve()) if f.exists() else False})
+    f = DB
+    rel = str(f) if f.is_absolute() else 'database/bblotto_v34.db'
+    candidates.append({'path': rel, 'exists': f.exists(), 'size_bytes': f.stat().st_size if f.exists() else 0, 'primary': True})
     return candidates
 
 
@@ -221,7 +221,7 @@ def rc39_db_standard(authorization: str|None = Header(default=None)):
         'version': RC3_9_VERSION,
         'primary_database': str(DB) if DB_ENGINE == 'sqlite' else 'DATABASE_URL(PostgreSQL)',
         'db_engine': DB_ENGINE,
-        'rule': '운영 기준 DB는 bblotto_v34.db 또는 PostgreSQL DATABASE_URL 하나로 통일합니다. lotto.db는 과거 데이터/참조용으로만 유지합니다.',
+        'rule': '운영 기준 DB는 bblotto_v34.db 또는 PostgreSQL DATABASE_URL 하나만 사용합니다.',
         'candidates': _rc39_database_candidates(),
         'recommendation': 'Railway 운영에서는 PostgreSQL 연결을 유지하거나, SQLite를 쓸 경우 BBLOTTO_DB_DIR를 영구 볼륨 경로로 설정하세요.'
     }

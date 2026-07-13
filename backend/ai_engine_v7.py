@@ -21,8 +21,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 BASE = Path(__file__).resolve().parents[1]
-DB_PATH = BASE / "database" / "bblotto_v34.db"
-ALT_DB_PATH = BASE / "database" / "lotto.db"
+def _resolve_primary_db_path() -> Path:
+    """Return the same primary SQLite path used by the FastAPI application."""
+    env_dir = os.getenv("BBLOTTO_DB_DIR", "").strip()
+    if env_dir:
+        db_dir = Path(env_dir)
+    else:
+        render_disk = Path("/data")
+        if render_disk.exists() and os.access(str(render_disk), os.W_OK):
+            db_dir = render_disk / "bblotto_database"
+        else:
+            db_dir = BASE / "database"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    return db_dir / "bblotto_v34.db"
+
+
+DB_PATH = _resolve_primary_db_path()
 ENGINE_VERSION = "BBLOTTO_RC10_AI_V7_AUTO_FULL_HISTORY"
 CACHE_KEY = "rc9_v7_full_history_statistical"
 MIN_REQUIRED_ROUND = 1
@@ -114,13 +128,9 @@ def _load_draws_from_db(db_path: Path) -> List[Dict[str, Any]]:
 
 
 def _load_draws() -> List[Dict[str, Any]]:
-    merged: Dict[int, Dict[str, Any]] = {}
-    # 보조 DB를 먼저 넣고, 메인 DB가 있으면 덮어쓴다.
-    for db_path in (ALT_DB_PATH, DB_PATH):
-        for d in _load_draws_from_db(db_path):
-            if int(d["r"]) > 0:
-                merged[int(d["r"])] = d
-    return sorted(merged.values(), key=lambda x: int(x["r"]), reverse=True)
+    """Load draw history only from the single primary database."""
+    draws = _load_draws_from_db(DB_PATH)
+    return sorted(draws, key=lambda x: int(x["r"]), reverse=True)
 
 
 def _flatten(draws: Sequence[Dict[str, Any]]) -> List[int]:
