@@ -2904,8 +2904,8 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     analysis=clean_template_text(build_analysis_text(safe_round, st, safe_mode, req.fixed, excluded_value, details))
     sms=clean_template_text(build_sms(member_name, safe_round, combos, analysis, details))
     engine=_engine_summary(details, st)
-    engine['phase']='STABLE-12'
-    recommendation_analysis=clean_template_text(_stable12_build_recommendation(safe_round, details))
+    engine['phase']='STABLE-13'
+    recommendation_analysis=clean_template_text(_stable13_build_recommendation(safe_round, details))
     engine['member_grade']=member_grade
     engine['grade_strength']=rc45_grade_strength_text(member_grade)
     engine['engine_label']=_rc729_engine_name(member_grade)
@@ -7976,10 +7976,10 @@ def make_premium_combos(count=10, fixed='', excluded='', mode='balanced', member
 
 # ===================== RC11 EXPLAINABLE ANALYSIS OVERRIDE =====================
 try:
-    from .analysis_engine_stable12 import build_evidence_analysis as _stable12_build_analysis, build_recommendation_analysis as _stable12_build_recommendation
+    from .analysis_engine_stable13 import build_evidence_analysis as _stable13_build_analysis, build_recommendation_analysis as _stable13_build_recommendation
 
     def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
-        return _stable12_build_analysis(round_no, st, mode, fixed, excluded, details or [])
+        return _stable13_build_analysis(round_no, st, mode, fixed, excluded, details or [])
 except Exception as _rc11_analysis_import_error:
     print('[BBLOTTO] RC11 analysis engine load failed:', repr(_rc11_analysis_import_error))
 # ===================== /RC11 EXPLAINABLE ANALYSIS OVERRIDE =====================

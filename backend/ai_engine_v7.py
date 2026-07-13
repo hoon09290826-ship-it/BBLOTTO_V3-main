@@ -1344,7 +1344,36 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         archetype = _stable11_archetype(combo, detail, cache)
         archetype_usage[archetype] += 1
         sig = _signature(combo)
-        evidence = [{"number": n, "reason": _stable11_number_evidence(n, cache)} for n in combo]
+        # STABLE-13: 설명 엔진이 추측하지 않도록 생성 시점의 실제 통계 근거를 구조화해 함께 저장한다.
+        pair_counts = {}
+        for item in cache.get("pair_recent_top") or cache.get("pair_top") or []:
+            try:
+                pair, cnt = item[0], item[1]
+                pair_counts[tuple(sorted(int(x) for x in pair))] = int(cnt)
+            except Exception:
+                continue
+        hot_rank = {int(v): i + 1 for i, v in enumerate(cache.get("hot") or [])}
+        overdue_rank = {int(v): i + 1 for i, v in enumerate(cache.get("overdue") or [])}
+        score_map = cache.get("score_map") or {}
+        evidence = []
+        for n in combo:
+            partners = sorted(
+                ((m, pair_counts.get(tuple(sorted((n, m))), 0)) for m in combo if m != n),
+                key=lambda x: (-x[1], x[0]),
+            )[:2]
+            evidence.append({
+                "number": n,
+                "reason": _stable11_number_evidence(n, cache),
+                "freq10": int((cache.get("frequency10") or {}).get(str(n), 0)),
+                "freq30": int((cache.get("frequency30") or {}).get(str(n), 0)),
+                "freq100": int((cache.get("frequency100") or {}).get(str(n), 0)),
+                "gap": int((cache.get("gap") or {}).get(str(n), 0)),
+                "hot_rank": hot_rank.get(n),
+                "overdue_rank": overdue_rank.get(n),
+                "selection_score": round(float(score_map.get(str(n), score_map.get(n, 0)) or 0), 3),
+                "partners": [{"number": m, "count": c} for m, c in partners if c > 0],
+                "role": ("강세수" if hot_rank.get(n, 99) <= 12 else "반등수" if overdue_rank.get(n, 99) <= 12 else "균형수"),
+            })
         hot = set((cache.get("hot") or [])[:14])
         overdue = set((cache.get("overdue") or [])[:14])
         reason_lines = [
