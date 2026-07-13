@@ -44,7 +44,7 @@ def sprint6_safe_backup(authorization: str|None = Header(default=None)):
     try:
         log_admin(admin.get('username','admin'), 'rc_safe_backup', f'backup={target.name}', '')
     except Exception:
-        pass
+        _log_suppressed_exception("90_release_rc3.py:47")
     return {'ok': True, 'version': SPRINT6_VERSION, 'backup_file': target.name, 'size_bytes': target.stat().st_size}
 
 
@@ -69,7 +69,7 @@ def sprint6_smoke_test(authorization: str|None = Header(default=None)):
     try:
         log_admin(admin.get('username','admin'), 'rc_smoke_test', f'ok={ok}', '')
     except Exception:
-        pass
+        _log_suppressed_exception("90_release_rc3.py:72")
     return {
         'ok': ok,
         'version': SPRINT6_VERSION,
@@ -125,7 +125,7 @@ def _rc39_backup_files(limit: int = 20):
             try:
                 out.append({'filename': f.name, 'size_bytes': f.stat().st_size, 'modified_at': datetime.datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'), 'format': f.suffix.lstrip('.')})
             except Exception:
-                pass
+                _log_suppressed_exception("90_release_rc3.py:128")
     out.sort(key=lambda x: x.get('modified_at',''), reverse=True)
     return out[:max(1, min(int(limit or 20), 100))]
 

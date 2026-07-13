@@ -26,7 +26,7 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
         st['member_name'] = member_name or ''
         st['member_grade'] = member_grade
     except Exception:
-        pass
+        _log_suppressed_exception("40_recommendations_sms.py:29")
     details = rc37_enrich_details(combos, details)
     combos, details = rc38_portfolio_reorder(combos, details)
     details = rc37_enrich_details(combos, details)

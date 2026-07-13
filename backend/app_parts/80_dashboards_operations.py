@@ -194,7 +194,7 @@ def rc44_auto_update(backfill:int=12, request:Request=None, authorization: str|N
     try:
         log_action(admin, 'RC4_4_AUTO_UPDATE', json.dumps(result, ensure_ascii=False), request)
     except Exception:
-        pass
+        _log_suppressed_exception("80_dashboards_operations.py:197")
     result['success_count'] = sum(1 for s in result['steps'] if s.get('ok'))
     result['failed_count'] = sum(1 for s in result['steps'] if not s.get('ok'))
     return result
@@ -340,14 +340,14 @@ def _s4_latest_backup():
             if latest:
                 return dict(latest)
     except Exception:
-        pass
+        _log_suppressed_exception("80_dashboards_operations.py:343")
     try:
         files = sorted(EXPORT_DIR.glob('*.db'), key=lambda p: p.stat().st_mtime, reverse=True)
         if files:
             f = files[0]
             return {'filename': f.name, 'reason': 'file', 'size_bytes': f.stat().st_size, 'created_at': datetime.datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')}
     except Exception:
-        pass
+        _log_suppressed_exception("80_dashboards_operations.py:350")
     return None
 
 def _s4_disk_status():
@@ -418,7 +418,7 @@ def sprint4_ops_backups_cleanup(keep:int=10, authorization: str|None = Header(de
             removed.append({'filename': f.name, 'size_bytes': f.stat().st_size})
             f.unlink()
         except Exception:
-            pass
+            _log_suppressed_exception("80_dashboards_operations.py:421")
     return {'ok': True, 'version': SPRINT4_VERSION, 'keep': keep, 'removed': removed, 'remaining': len(files)-len(removed)}
 
 @router.get('/api/ops/audit/recent')

@@ -400,7 +400,7 @@ def backup_cleanup(keep:int=20, authorization: str|None = Header(default=None)):
         try:
             removed.append(f.name); f.unlink()
         except Exception:
-            pass
+            _log_suppressed_exception("20_auth_admin_settings.py:403")
     return {'ok': True, 'keep': keep, 'removed': removed, 'remaining': len(files)-len(removed)}
 
 @router.get('/api/rc3-4/status')

@@ -761,7 +761,7 @@ def ensure_sprint23_schema():
             c.execute('CREATE TABLE IF NOT EXISTS dashboard_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT, snapshot_json TEXT DEFAULT "{}", created_at TEXT)')
             c.commit()
     except Exception:
-        pass
+        _log_suppressed_exception("70_ai_engine.py:764")
 
 ensure_sprint23_schema()
 
@@ -780,7 +780,7 @@ def _s23_weighted_number_profile(st, mode='balanced'):
             try:
                 if n in k: pair_boost += min(4, v)*0.03
             except Exception:
-                pass
+                _log_suppressed_exception("70_ai_engine.py:783")
         if mode=='aggressive': score=hot*1.18 + cold*0.55 + balance*0.52 + pair_boost
         elif mode=='conservative': score=hot*0.62 + cold*1.25 + balance*0.88 + pair_boost
         else: score=hot*0.83 + cold*1.03 + balance*0.75 + pair_boost

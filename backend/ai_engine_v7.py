@@ -8,6 +8,11 @@
 """
 from __future__ import annotations
 
+import logging
+
+_ai_logger = logging.getLogger("bblotto.ai_engine")
+
+
 import itertools
 import json
 import random
@@ -100,7 +105,7 @@ def _parse_nums(value: Any) -> List[int]:
             if 1 <= n <= 45 and n not in nums:
                 nums.append(n)
         except Exception:
-            pass
+            _ai_logger.warning("suppressed exception: ai_engine_v7.py:107", exc_info=True)
     return sorted(nums)
 
 

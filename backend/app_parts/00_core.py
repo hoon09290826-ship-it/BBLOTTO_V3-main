@@ -4,9 +4,23 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pathlib import Path
-import sqlite3, json, random, re, itertools, datetime, secrets, hashlib, hmac, io, csv, collections, shutil, os, urllib.request, urllib.parse, time, threading
+import sqlite3, json, random, re, itertools, datetime, secrets, hashlib, hmac, io, csv, collections, shutil, os, urllib.request, urllib.parse, time, threading, logging
 
 BASE = Path(__file__).resolve().parents[1]
+
+# STAGE3: 운영 중 숨겨진 예외를 표준 출력 로그에 남깁니다.
+# 기존 기능의 fallback 동작은 유지하되, 원인 추적이 가능하도록 traceback을 기록합니다.
+logger = logging.getLogger("bblotto")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    logger.addHandler(_handler)
+logger.setLevel(getattr(logging, os.getenv("BBLOTTO_LOG_LEVEL", "INFO").upper(), logging.INFO))
+logger.propagate = False
+
+def _log_suppressed_exception(context: str, level: int = logging.WARNING):
+    logger.log(level, "suppressed exception: %s", context, exc_info=True)
+
 
 # PHASE21: 데이터 초기화 방지 / 영구저장 경로 고정
 # 우선순위
@@ -144,6 +158,7 @@ def rc2_http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 def rc2_unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("unhandled request error path=%s method=%s", request.url.path, request.method, exc_info=exc)
     return JSONResponse(status_code=500, content={
         'ok': False,
         'error': {'type': exc.__class__.__name__, 'message': '서버 처리 중 오류가 발생했습니다.'},
@@ -161,7 +176,7 @@ try:
     from .data import DRAWS as FULL_DRAWS
     DEFAULT_DRAWS = [(int(x['r']), x.get('d',''), list(x.get('n',[])), int(x.get('b',0))) for x in FULL_DRAWS]
 except Exception:
-    pass
+    _log_suppressed_exception("00_core.py:179")
 
 PRIZE_TABLE = {'1등': 2000000000, '2등': 50000000, '3등': 1500000, '4등': 50000, '5등': 5000, '낙첨': 0}
 COST_PER_COMBO = 1000
@@ -671,7 +686,7 @@ def log_login_event(admin_id=0, username='', success=0, message='', request: Req
             c.commit()
     except Exception:
         # 로그인 자체가 실패하지 않도록 로그 저장 오류는 무시합니다.
-        pass
+        _log_suppressed_exception("00_core.py:689")
 
 
 # RC3-4: PostgreSQL/SQLite 공통 운영 백업 테이블 목록
@@ -693,7 +708,7 @@ def _json_default(value):
         if isinstance(value, (datetime.datetime, datetime.date)):
             return value.isoformat()
     except Exception:
-        pass
+        _log_suppressed_exception("00_core.py:711")
     return str(value)
 
 
@@ -724,7 +739,7 @@ def _backup_export_json(reason='manual', admin=None):
             c.execute('INSERT INTO backup_history(filename,reason,size_bytes,created_by,created_at) VALUES(?,?,?,?,?)', (filename, reason, size, admin.get('id') if admin else None, now()))
             c.commit()
     except Exception:
-        pass
+        _log_suppressed_exception("00_core.py:742")
     return {'filename': filename, 'format': 'json', 'engine': DB_ENGINE, 'reason': reason, 'size_bytes': size, 'created_at': now()}
 
 
@@ -746,7 +761,7 @@ def create_db_backup(reason='manual', admin=None):
             c.execute('INSERT INTO backup_history(filename,reason,size_bytes,created_by,created_at) VALUES(?,?,?,?,?)', (filename, reason, size, admin.get('id') if admin else None, now()))
             c.commit()
     except Exception:
-        pass
+        _log_suppressed_exception("00_core.py:764")
     return {'filename': filename, 'format': 'sqlite_db', 'engine': DB_ENGINE, 'reason': reason, 'size_bytes': size, 'created_at': now()}
 
 
@@ -772,7 +787,7 @@ def _restore_json_backup(path: Path, admin=None, request: Request|None=None):
             try:
                 c.execute(f'DELETE FROM {table}')
             except Exception:
-                pass
+                _log_suppressed_exception("00_core.py:790")
         for table in RC3_BACKUP_TABLES:
             rows = tables.get(table) or []
             if not rows:
@@ -792,13 +807,13 @@ def _restore_json_backup(path: Path, admin=None, request: Request|None=None):
                     c.execute(f'INSERT INTO {table}({col_sql}) VALUES({marks})', vals)
                     count += 1
                 except Exception:
-                    pass
+                    _log_suppressed_exception("00_core.py:810")
             inserted[table] = count
         c.commit()
     try:
         log_action(admin or {}, 'RESTORE_BACKUP', f'복원 완료: {path.name}', request)
     except Exception:
-        pass
+        _log_suppressed_exception("00_core.py:816")
     return {'ok': True, 'restored_from': path.name, 'engine': DB_ENGINE, 'inserted': inserted, 'restored_at': now()}
 
 def ensure_daily_backup():
@@ -810,7 +825,7 @@ def ensure_daily_backup():
         if not r or r['c'] == 0:
             create_db_backup('auto_daily', None)
     except Exception:
-        pass
+        _log_suppressed_exception("00_core.py:828")
 
 init_db()
 ensure_daily_backup()
@@ -828,7 +843,7 @@ def current_admin(authorization: str|None):
         try:
             c.execute('UPDATE sessions SET last_seen_at=? WHERE token=?', (now(), token)); c.commit()
         except Exception:
-            pass
+            _log_suppressed_exception("00_core.py:846")
         return dict(row)
 
 def require_admin(authorization: str|None = Header(default=None)):

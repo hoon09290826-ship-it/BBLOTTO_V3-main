@@ -276,7 +276,7 @@ def rc5_15_status():
                 if fp.stat().st_size > 20 * 1024 * 1024:
                     large_files.append(p)
             except Exception:
-                pass
+                _log_suppressed_exception("10_system_status_ui.py:279")
     add('no_python_cache_files', len(blocked) == 0, ', '.join(blocked[:10]) if blocked else 'clean')
     add('no_secret_env_files', len(secret_files) == 0, ', '.join(secret_files[:10]) if secret_files else 'clean')
     add('no_backup_artifacts', len(backup_files) == 0, ', '.join(backup_files[:10]) if backup_files else 'clean')
@@ -407,7 +407,7 @@ def _pg_set_sequence(c, table: str):
             c.execute('ROLLBACK TO SAVEPOINT rc3_seq')
             c.execute('RELEASE SAVEPOINT rc3_seq')
         except Exception:
-            pass
+            _log_suppressed_exception("10_system_status_ui.py:410")
 
 def rc3_migrate_sqlite_to_current_db(source_path: Path | None = None):
     """기존 SQLite DB 데이터를 현재 DB(PostgreSQL 권장)로 1회성 복사합니다."""
@@ -490,7 +490,7 @@ def rc3_migrate_sqlite_to_postgres(authorization: str|None = Header(default=None
     try:
         log_action(admin, 'RC3_MIGRATE_SQLITE_TO_POSTGRES', json.dumps(result, ensure_ascii=False)[:500])
     except Exception:
-        pass
+        _log_suppressed_exception("10_system_status_ui.py:493")
     return result
 
 
@@ -501,7 +501,7 @@ def rc3_member_db_ensure(authorization: str|None = Header(default=None)):
     try:
         log_action(admin, 'RC3_3_ENSURE_MEMBER_DB', '회원/관리자 PostgreSQL 스키마 점검 및 보강')
     except Exception:
-        pass
+        _log_suppressed_exception("10_system_status_ui.py:504")
     return rc3_member_db_status(authorization)
 
 @router.get('/api/rc3/member-db/status')
