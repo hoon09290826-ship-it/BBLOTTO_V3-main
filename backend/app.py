@@ -2904,7 +2904,8 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     analysis=clean_template_text(build_analysis_text(safe_round, st, safe_mode, req.fixed, excluded_value, details))
     sms=clean_template_text(build_sms(member_name, safe_round, combos, analysis, details))
     engine=_engine_summary(details, st)
-    engine['phase']='STABLE-11'
+    engine['phase']='STABLE-12'
+    recommendation_analysis=clean_template_text(_stable12_build_recommendation(safe_round, details))
     engine['member_grade']=member_grade
     engine['grade_strength']=rc45_grade_strength_text(member_grade)
     engine['engine_label']=_rc729_engine_name(member_grade)
@@ -2914,7 +2915,7 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     # RC8.18: 번호 생성 단계에서는 DB에 저장하지 않습니다.
     # 추천번호 저장/보낸문자 저장을 명시적으로 실행한 경우에만 recommendations에 등록됩니다.
     log_action(admin,'GENERATE_PREVIEW_RC8_18',f'{safe_round}회차 {len(combos)}조합 미리보기 생성 · 저장 안 함',request)
-    return {'id':None,'saved':False,'round_no':safe_round,'round':safe_round,'sets':combos,'combos':combos,'details':details,'top3':engine.get('top3',[]),'engine':engine,'analysis':analysis,'sms':sms,'member_id':member_id,'member_name':member_name,'member_notice':sms,'quality_guide':engine.get('quality_guide')}
+    return {'id':None,'saved':False,'round_no':safe_round,'round':safe_round,'sets':combos,'combos':combos,'details':details,'top3':engine.get('top3',[]),'engine':engine,'analysis':analysis,'recommendation_analysis':recommendation_analysis,'sms':sms,'member_id':member_id,'member_name':member_name,'member_notice':sms,'quality_guide':engine.get('quality_guide')}
 
 
 @app.post('/api/recommendations/save')
@@ -7975,10 +7976,10 @@ def make_premium_combos(count=10, fixed='', excluded='', mode='balanced', member
 
 # ===================== RC11 EXPLAINABLE ANALYSIS OVERRIDE =====================
 try:
-    from .analysis_engine_rc11 import build_member_friendly_analysis as _rc11_build_analysis
+    from .analysis_engine_stable12 import build_evidence_analysis as _stable12_build_analysis, build_recommendation_analysis as _stable12_build_recommendation
 
     def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
-        return _rc11_build_analysis(round_no, st, mode, fixed, excluded, details or [])
+        return _stable12_build_analysis(round_no, st, mode, fixed, excluded, details or [])
 except Exception as _rc11_analysis_import_error:
     print('[BBLOTTO] RC11 analysis engine load failed:', repr(_rc11_analysis_import_error))
 # ===================== /RC11 EXPLAINABLE ANALYSIS OVERRIDE =====================

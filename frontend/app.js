@@ -1675,7 +1675,7 @@ async function generate(){
     currentRound=d.round||d.round_no||body.round_no||'';
     const fallback = buildFallbackAnalysis(currentCombos, latestStatsCache, body.mode);
     currentAnalysis=normalizeText(d.analysis||d.ai_analysis||d.engine?.summary||fallback).trim() || fallback;
-    currentRecommendationAnalysis=buildRecommendationAnalysis(currentCombos,currentDetails);
+    currentRecommendationAnalysis=normalizeText(d.recommendation_analysis||'').trim() || buildRecommendationAnalysis(currentCombos,currentDetails);
     currentSms=normalizeText(d.sms||'') || buildTemplateMessage(getSelectedMember(), currentRound, currentCombos, currentAnalysis);
     setText('roundLabel', currentRound ? `${currentRound}회차 추천번호 · 심층분석 완료` : '생성 완료');
     renderCombos(currentCombos,currentDetails);
