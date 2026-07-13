@@ -583,8 +583,9 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
     for n in excluded_nums:
         weights.pop(n, None)
 
-    target_candidates = {"일반": 6500, "2등": 9000, "1등": 12000}.get(grade, 6500)
-    target_candidates = max(target_candidates, count * 700)
+    target_candidates = {"일반": 2200, "2등": 3000, "1등": 4000}.get(grade, 2200)
+    # FAST 패치: 요청 조합 수에 비례하되 과도한 후보 반복은 제한한다.
+    target_candidates = max(target_candidates, count * 180)
     candidates: List[Tuple[float, List[int], List[str], Dict[str, Any]]] = []
     seen: set[Tuple[int, ...]] = set()
     attempts = 0
@@ -1251,7 +1252,7 @@ def rc9_audit() -> Dict[str, Any]:
 # ===================== STABLE-11 DYNAMIC PORTFOLIO & EXPLAINABLE ENGINE =====================
 # 기존 통계/캐시/후보 생성은 그대로 사용하고 최종 조합의 다양성과 설명 데이터를 강화한다.
 _STABLE11_BASE_MAKE_PREMIUM_COMBOS = make_premium_combos
-STABLE11_ENGINE_VERSION = "BBLOTTO_STABLE_11_DYNAMIC_EXPLAINABLE"
+STABLE11_ENGINE_VERSION = "BBLOTTO_STABLE_11_FAST_DYNAMIC_EXPLAINABLE"
 
 
 def _stable11_archetype(nums: Sequence[int], detail: Dict[str, Any], cache: Dict[str, Any]) -> str:
@@ -1315,7 +1316,7 @@ def _stable11_portfolio_value(combo: Sequence[int], detail: Dict[str, Any], sele
 def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None):
     target = max(1, min(50, int(count or 10)))
     # 최종 요청 수보다 넓은 후보군을 만든 뒤 포트폴리오 단위로 다시 선별한다.
-    candidate_count = min(50, max(target, 32 if target <= 10 else target * 2))
+    candidate_count = min(50, max(target, 18 if target <= 10 else int(target * 1.5)))
     combos, details, st = _STABLE11_BASE_MAKE_PREMIUM_COMBOS(candidate_count, fixed, excluded, mode, member_grade, member_id=member_id)
     cache = get_analysis_cache(False)
     detail_map = {tuple(sorted(d.get("numbers") or [])): dict(d) for d in (details or [])}
