@@ -1,0 +1,197 @@
+# STABLE-1 API 연결 목록
+
+- 백엔드 라우트 수: **147개**
+- 프론트 정적 API 호출 문자열 수: **40개**
+
+## 프론트 API 호출
+
+- `/api/admin-logs`
+- `/api/admin-overview`
+- `/api/admin/ai-v6/cache-status`
+- `/api/admin/ai-v6/full-sync-step?chunk_size=25`
+- `/api/admins`
+- `/api/admins/`
+- `/api/ai-engine/v6-cache`
+- `/api/backups`
+- `/api/backups/cleanup?keep=`
+- `/api/backups/create`
+- `/api/backups/restore/`
+- `/api/backups/validate/`
+- `/api/check_winning`
+- `/api/dashboard_summary`
+- `/api/dashboard_v2`
+- `/api/draws/next`
+- `/api/draws/search?round_no=`
+- `/api/draws?limit=100`
+- `/api/generate`
+- `/api/logout`
+- `/api/me`
+- `/api/members`
+- `/api/members/`
+- `/api/ops/health`
+- `/api/rc4-4/admin-dashboard`
+- `/api/rc4-4/ai-status`
+- `/api/rc4-4/auto-update?backfill=12`
+- `/api/recommendations`
+- `/api/recommendations/`
+- `/api/recommendations/save`
+- `/api/security_status`
+- `/api/sessions`
+- `/api/sessions/`
+- `/api/sessions/cleanup`
+- `/api/settings`
+- `/api/sms`
+- `/api/sms/`
+- `/api/sms_log`
+- `/api/stats?limit=`
+- `/api/template`
+
+## 백엔드 라우트
+
+- `GET /api/rc6-10/status`
+- `GET /api/health`
+- `GET /api/rc5-12/status`
+- `GET /api/rc5-13/status`
+- `GET /api/rc5-14/status`
+- `GET /api/rc5-15/status`
+- `GET /api/rc5-16/status`
+- `GET /api/persistence_status`
+- `GET /api/rc3/database/status`
+- `POST /api/rc3/migrate/sqlite-to-postgres`
+- `POST /api/rc3/member-db/ensure`
+- `GET /api/rc3/member-db/status`
+- `GET /api/rc3/member-db/login-logs`
+- `GET /api/version`
+- `GET /api/rc3-8/health`
+- `GET /api/rc3-8/recommendation-summary`
+- `GET /api/rc6-7/status`
+- `GET /`
+- `GET /dashboard`
+- `GET /style.css`
+- `GET /app.js`
+- `GET /login.js`
+- `GET /manifest.json`
+- `GET /service-worker.js`
+- `POST /api/login`
+- `POST /api/logout`
+- `GET /api/me`
+- `PUT /api/me`
+- `GET /api/admins`
+- `POST /api/admins`
+- `DELETE /api/admins/{admin_id}`
+- `GET /api/admins/{admin_id}`
+- `PUT /api/admins/{admin_id}`
+- `POST /api/admins/{admin_id}/activate`
+- `POST /api/sessions/cleanup`
+- `GET /api/security_status`
+- `GET /api/sessions`
+- `DELETE /api/sessions/{token_tail}`
+- `GET /api/dashboard`
+- `GET /api/dashboard_summary`
+- `GET /api/settings`
+- `GET /api/template`
+- `POST /api/template`
+- `POST /api/settings`
+- `GET /api/admin-stats`
+- `GET /api/admin-logs`
+- `GET /api/admin-overview`
+- `GET /api/backups`
+- `POST /api/backups/create`
+- `POST /api/backups/restore/{filename}`
+- `GET /api/backups/validate/{filename}`
+- `POST /api/backups/cleanup`
+- `GET /api/rc3-4/status`
+- `GET /api/backups/download/{filename}`
+- `GET /api/members`
+- `GET /api/members_summary`
+- `GET /api/members_manage_overview`
+- `POST /api/members/{member_id}/status`
+- `POST /api/members/bulk_status`
+- `POST /api/members`
+- `DELETE /api/members/{member_id}`
+- `PUT /api/members/{member_id}`
+- `GET /api/members/{member_id}/detail`
+- `PUT /api/members/{member_id}/memo`
+- `POST /api/members/{member_id}/notes`
+- `GET /api/rc3-12/member-link-status`
+- `POST /api/rc3-12/link-orphan-recommendations`
+- `POST /api/generate`
+- `POST /api/recommendations/save`
+- `GET /api/recommendations`
+- `GET /api/recommendations/{rec_id}`
+- `POST /api/sms`
+- `POST /api/sms_log`
+- `GET /api/sms`
+- `DELETE /api/sms/{sms_id}`
+- `POST /api/win-check`
+- `GET /api/win-checks`
+- `GET /api/draws`
+- `GET /api/draws/search`
+- `GET /api/draws/next`
+- `GET /api/draws/check-auto`
+- `POST /api/draws/fetch-official`
+- `POST /api/draws`
+- `POST /api/check_winning`
+- `POST /api/win-check-auto`
+- `GET /api/stats`
+- `GET /api/export/members_csv`
+- `GET /api/export/recommendations_csv`
+- `GET /api/export/winning_csv`
+- `GET /api/backup_db`
+- `GET /api/export/excel`
+- `GET /api/export/report_txt`
+- `GET /api/export/final_bundle`
+- `GET /api/export/pdf`
+- `POST /api/export_pdf`
+- `GET /api/ai-engine/summary`
+- `GET /api/engine/insights`
+- `GET /api/dashboard_v2`
+- `POST /api/engine/backfill_runs`
+- `GET /api/rc4-4/admin-dashboard`
+- `GET /api/rc4-4/ai-status`
+- `GET /api/rc4-4/member-dashboard`
+- `POST /api/rc4-4/auto-update`
+- `POST /api/draws/sync`
+- `GET /api/draws/status_v2`
+- `GET /api/stats/round100`
+- `GET /api/mobile/status`
+- `GET /api/ops/health`
+- `POST /api/ops/backup/create`
+- `POST /api/ops/backups/cleanup`
+- `GET /api/ops/audit/recent`
+- `GET /api/ops/validation`
+- `GET /api/release/readiness`
+- `GET /api/release/checklist`
+- `GET /api/rc/version`
+- `GET /api/rc/db-safety`
+- `POST /api/rc/safe-backup`
+- `GET /api/rc/smoke-test`
+- `GET /api/rc/error-policy`
+- `GET /api/rc3-9/status`
+- `POST /api/rc3-9/backup-create`
+- `GET /api/rc3-9/admin-audit`
+- `GET /api/rc3-9/recommendation-audit`
+- `GET /api/rc3-9/db-standard`
+- `GET /api/rc3-10/status`
+- `GET /api/rc3-12/status`
+- `GET /api/rc3-11/engine-status`
+- `GET /api/rc3-14/status`
+- `GET /api/rc3-15/draw-integrity`
+- `POST /api/rc3-15/repair-draws`
+- `GET /api/rc6-11/status`
+- `GET /api/rc7-1/status`
+- `POST /api/export/smsganda_xls`
+- `POST /api/export/smsganda_txt`
+- `GET /api/rc7-5/status`
+- `GET /api/rc7-6/status`
+- `GET /api/rc7-8/status`
+- `GET /api/rc7-4/status`
+- `GET /api/rc7-3/status`
+- `GET /api/rc7-2/status`
+- `GET /api/ai-engine/v6-cache`
+- `POST /api/ai-engine/v6-sync-full`
+- `POST /api/admin/ai-v6/full-sync`
+- `POST /api/admin/ai-v6/full-sync-step`
+- `GET /api/admin/ai-v6/cache-status`
+- `GET /admin/sync-full-history`
+- `GET /api/ai-engine/rc9-audit`

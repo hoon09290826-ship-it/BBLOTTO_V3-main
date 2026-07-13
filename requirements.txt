@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+openpyxl
+python-multipart
+psycopg2-binary
+xlwt==1.3.0
