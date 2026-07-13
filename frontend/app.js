@@ -1,4 +1,4 @@
-/* BBLOTTO V3 STABLE CORE SAME NUMBER SAVE - single event owner: app.js */
+/* BBLOTTO V3 STABLE CORE - single event owner: app.js */
 (function(){
   'use strict';
   function prepareUi(){
@@ -10,7 +10,7 @@
       modal.style.display='none';
       modal.setAttribute('aria-hidden','true');
     }
-    document.documentElement.dataset.bblottoUi='same-number-save-1';
+    document.documentElement.dataset.bblottoUi='stable-core-1';
   }
   window.addEventListener('error',function(event){
     console.error('[BBLOTTO STABLE CORE]',event.error||event.message);
@@ -20,7 +20,7 @@
   });
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',prepareUi,{once:true});
   else prepareUi();
-  window.BBLOTTO_STABLE_CORE='same-number-save-1';
+  window.BBLOTTO_STABLE_CORE='1.0.0';
 })();
 
 /* BBLOTTO PRO V40 PHASE2 FRONTEND CORE
@@ -54,7 +54,6 @@ let drawPageSize = 10;
 let latestStatsCache = null;
 let currentAdmin = null;
 let quickMemberGenerationMode = false;
-const memberQuickResults = new Map(); // 회원별 마지막 생성 결과: 복사저장은 이 결과만 사용
 let adminCache = [];
 let sessionWatchTimer = null;
 let sessionWarned = false;
@@ -754,7 +753,7 @@ function renderMembers(list){
         <small class="member-owner-line">등록 관리자: <strong>${esc(registeredBy)}</strong>${m.created_at ? ' · 등록일 ' + esc(toDateInputValue(m.created_at)||m.created_at) : ''}${m.contract_end_at ? ' · 계약만료 ' + esc(toDateInputValue(m.contract_end_at)||m.contract_end_at) : ''}</small>
         <small>${esc(m.memo||'')}</small>
       </div>
-      <div class="member-actions"><button class="combo-count-badge combo-generate-copy" data-action="member-generate-copy" data-member-id="${m.id}" title="이 회원 조합수로 추천번호 생성 후 문자 자동 복사">${esc(getMemberPreferredCount(m))}조합</button><button class="sms-save-copy-badge" data-action="member-generate-save" data-member-id="${m.id}" title="직전에 생성한 동일 추천번호를 복사하고 저장">복사저장</button><button data-action="member-select" data-member-id="${m.id}">선택</button><button data-action="member-detail" data-member-id="${m.id}">상세페이지</button><button data-action="member-status" data-member-id="${m.id}" data-status="활성">활성</button><button data-action="member-status" data-member-id="${m.id}" data-status="정지">정지</button><button data-action="member-status" data-member-id="${m.id}" data-status="탈퇴">탈퇴</button><button data-action="member-delete" data-member-id="${m.id}">삭제</button></div>
+      <div class="member-actions"><button class="combo-count-badge combo-generate-copy" data-action="member-generate-copy" data-member-id="${m.id}" title="이 회원 조합수로 추천번호 생성 후 문자 자동 복사">${esc(getMemberPreferredCount(m))}조합</button><button class="sms-save-copy-badge" data-action="member-generate-save" data-member-id="${m.id}" title="추천번호 생성 후 문자 복사와 보낸문자 저장을 같이 실행">복사저장</button><button data-action="member-select" data-member-id="${m.id}">선택</button><button data-action="member-detail" data-member-id="${m.id}">상세페이지</button><button data-action="member-status" data-member-id="${m.id}" data-status="활성">활성</button><button data-action="member-status" data-member-id="${m.id}" data-status="정지">정지</button><button data-action="member-status" data-member-id="${m.id}" data-status="탈퇴">탈퇴</button><button data-action="member-delete" data-member-id="${m.id}">삭제</button></div>
     </div>`;
   }).join('');
   renderPagination('memberPager', source.length, memberPage, memberPageSize, 'setMemberPage', 'setMemberPageSize');
@@ -1498,39 +1497,6 @@ async function saveCurrentSmsLog(){
   catch(e){ return await api('/api/sms',{method:'POST',body}); }
 }
 
-function captureCurrentMemberResult(memberId){
-  const snapshot={
-    memberId:String(memberId),
-    combos:normalizeCombos(currentCombos),
-    details:Array.isArray(currentDetails) ? JSON.parse(JSON.stringify(currentDetails)) : [],
-    sms:String(($('smsPreview')?.value || currentSms || '')).trim(),
-    analysis:String(currentAnalysis||''),
-    recommendationAnalysis:String(currentRecommendationAnalysis||''),
-    round:currentRound,
-    recId:null
-  };
-  memberQuickResults.set(String(memberId), snapshot);
-  return snapshot;
-}
-
-function restoreMemberResult(memberId){
-  const snapshot=memberQuickResults.get(String(memberId));
-  if(!snapshot || !normalizeCombos(snapshot.combos).length) return null;
-  currentCombos=normalizeCombos(snapshot.combos);
-  currentDetails=Array.isArray(snapshot.details) ? JSON.parse(JSON.stringify(snapshot.details)) : [];
-  currentSms=String(snapshot.sms||'');
-  currentAnalysis=String(snapshot.analysis||'');
-  currentRecommendationAnalysis=String(snapshot.recommendationAnalysis||'');
-  currentRound=snapshot.round||'';
-  currentRecId=snapshot.recId||null;
-  renderCombos(currentCombos,currentDetails);
-  renderAnalysis(currentAnalysis);
-  renderRecommendationAnalysis(currentRecommendationAnalysis);
-  refreshSmsPreview();
-  saveWorkspaceState();
-  return snapshot;
-}
-
 window.generateMemberAndCopy = safe(async function(id, btn){
   const m=membersCache.find(x=>String(x.id)===String(id));
   if(!m){ alert('회원을 찾을 수 없습니다.'); return; }
@@ -1544,17 +1510,15 @@ window.generateMemberAndCopy = safe(async function(id, btn){
     const expected=getMemberPreferredCount(m);
     if(normalizeCombos(currentCombos).length!==expected) throw new Error(`추천번호 ${expected}조합 생성 확인에 실패했습니다.`);
     if(!String(currentAnalysis||'').trim()) throw new Error('분석요약 생성 확인에 실패했습니다.');
-    const snapshot=captureCurrentMemberResult(id);
-    let copied=false;
-    try{ await copyTextToClipboard(snapshot.sms); copied=true; }
-    catch(copyError){ console.warn('문자 복사 권한이 차단되었습니다.', copyError); }
-    toast(`${m.name} ${expected}조합 새 번호 생성 완료${copied?' · 문자 복사 완료':' · 복사는 브라우저에서 차단됨'}`);
-    if(btn) btn.textContent=copied?'복사완료':'생성완료';
+    const text = ($('smsPreview')?.value || currentSms || '').trim();
+    await copyTextToClipboard(text);
+    toast(`${m.name} ${expected}조합 생성·분석·문자 복사 완료`);
+    if(btn) btn.textContent='복사완료';
     setTimeout(()=>{ if(btn){ btn.textContent=oldText || `${getMemberPreferredCount(m)}조합`; btn.disabled=false; } }, 1200);
   }catch(e){
     console.error(e);
     if(btn){ btn.textContent=oldText || `${getMemberPreferredCount(m)}조합`; btn.disabled=false; }
-    alert('자동 생성 실패: '+(e.message||e));
+    alert('자동 생성/복사 실패: '+(e.message||e));
   }
 });
 
@@ -1563,38 +1527,26 @@ window.generateMemberCopyAndSave = safe(async function(id, btn){
   if(!m){ alert('회원을 찾을 수 없습니다.'); return; }
   const oldText = btn?.textContent;
   try{
-    const snapshot=memberQuickResults.get(String(id));
-    if(!snapshot || !normalizeCombos(snapshot.combos).length){
-      alert(`먼저 ${getMemberPreferredCount(m)}조합 버튼을 눌러 추천번호를 생성하세요.`);
-      return;
-    }
-    if(btn){ btn.disabled=true; btn.textContent='저장중'; }
+    if(btn){ btn.disabled=true; btn.textContent='생성중'; }
     window.selectMember(id);
-    const restored=restoreMemberResult(id);
-    if(!restored) throw new Error('저장할 추천번호를 찾지 못했습니다. 다시 조합 버튼을 눌러주세요.');
+    setGenCountValue(getMemberPreferredCount(m));
+    quickMemberGenerationMode=true;
+    try{ await generate(); } finally { quickMemberGenerationMode=false; }
     const expected=getMemberPreferredCount(m);
-    if(normalizeCombos(currentCombos).length!==expected) throw new Error(`현재 생성 결과가 ${expected}조합이 아닙니다. 다시 조합 버튼을 눌러주세요.`);
-
-    // 번호를 새로 생성하지 않고, 직전에 만든 동일 번호를 먼저 저장합니다.
+    if(normalizeCombos(currentCombos).length!==expected) throw new Error(`추천번호 ${expected}조합 생성 확인에 실패했습니다.`);
+    if(!String(currentAnalysis||'').trim()) throw new Error('분석요약 생성 확인에 실패했습니다.');
+    const text = ($('smsPreview')?.value || currentSms || '').trim();
+    await copyTextToClipboard(text);
     await saveCurrentSmsLog();
-    const savedRecId=currentRecId;
-    const savedSnapshot={...restored, recId:savedRecId};
-    memberQuickResults.set(String(id), savedSnapshot);
-
-    let copied=false;
-    try{ await copyTextToClipboard(($('smsPreview')?.value || currentSms || '').trim()); copied=true; }
-    catch(copyError){ console.warn('저장은 완료됐지만 문자 복사가 차단되었습니다.', copyError); }
-
     await Promise.all([loadDashboard(), loadMembers()]);
     if($('genMember')) $('genMember').value=String(id);
-    restoreMemberResult(id);
-    toast(`${m.name} ${expected}조합 동일 번호 저장 완료${copied?' · 문자 복사 완료':' · 복사는 브라우저에서 차단됨'}`);
+    toast(`${m.name} ${getMemberPreferredCount(m)}조합 문자 복사 + 보낸문자 저장 완료`);
     if(btn) btn.textContent='저장완료';
     setTimeout(()=>{ if(btn){ btn.textContent=oldText || '복사저장'; btn.disabled=false; } }, 1200);
   }catch(e){
     console.error(e);
     if(btn){ btn.textContent=oldText || '복사저장'; btn.disabled=false; }
-    alert('복사저장 실패: '+(e.message||e));
+    alert('자동 생성/복사/저장 실패: '+(e.message||e));
   }
 });
 window.detailMember=safe(async function(id){
