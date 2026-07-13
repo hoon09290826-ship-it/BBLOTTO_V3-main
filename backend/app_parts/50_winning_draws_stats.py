@@ -1,5 +1,5 @@
 # Extracted from legacy backend/app.py lines 3076-3407.
-@app.post('/api/win-check')
+@router.post('/api/win-check')
 def win_check(req:WinReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     wins=parse_nums(req.win_numbers)
@@ -16,13 +16,13 @@ def win_check(req:WinReq, request:Request, authorization: str|None = Header(defa
     summary['roi']=round((summary['profit']/summary['cost']*100),2) if summary['cost'] else 0
     log_action(admin,'WIN_CHECK',f'{req.round_no}회차 수익률 계산',request); return {'wins':wins,'bonus':req.bonus,'results':results,'summary':summary}
 
-@app.get('/api/win-checks')
+@router.get('/api/win-checks')
 def win_checks(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c: rows=c.execute('SELECT * FROM winning_checks ORDER BY id DESC LIMIT 300').fetchall()
     return [dict(r) for r in rows]
 
-@app.get('/api/draws')
+@router.get('/api/draws')
 def draws(limit:int=100, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     limit=max(1, min(200, int(limit or 100)))
@@ -31,7 +31,7 @@ def draws(limit:int=100, authorization: str|None = Header(default=None)):
 
 
 
-@app.get('/api/draws/search')
+@router.get('/api/draws/search')
 def search_draw(round_no:int, authorization: str|None = Header(default=None)):
     """V3.0.0 STABLE: 1회차부터 추첨 완료 최신 회차까지 회차별 당첨번호 조회.
     DB에 없으면 동행복권 공개 조회를 시도하고, 성공 시 DB에 저장합니다.
@@ -71,7 +71,7 @@ def search_draw(round_no:int, authorization: str|None = Header(default=None)):
         'message': f'{r}회 당첨번호가 DB에 없고 자동 조회도 실패했습니다. 인터넷 연결 또는 동행복권 조회 차단 여부를 확인하세요.'
     }
 
-@app.get('/api/draws/next')
+@router.get('/api/draws/next')
 def next_draw_round(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     expected = expected_lotto_round()
@@ -101,12 +101,12 @@ def next_draw_round(authorization: str|None = Header(default=None)):
         'message': check.get('message','')
     }
 
-@app.get('/api/draws/check-auto')
+@router.get('/api/draws/check-auto')
 def check_draw_auto(round_no:int|None=None, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     return resolve_draw_for_check(round_no or expected_lotto_round(), allow_fetch=True)
 
-@app.post('/api/draws/fetch-official')
+@router.post('/api/draws/fetch-official')
 def fetch_draw_official_api(req: dict, request:Request, authorization: str|None = Header(default=None)):
     """RC3-10: 운영자가 회차를 강제로 공식/캐시 조회 후 DB에 저장할 수 있는 복구 API."""
     admin = require_admin(authorization)
@@ -118,7 +118,7 @@ def fetch_draw_official_api(req: dict, request:Request, authorization: str|None 
     log_action(admin, 'RC3_10_FETCH_DRAW', f'{r}회 당첨번호 자동조회/저장 source={saved.get("source")}', request)
     return {'ok': True, 'version': RC3_10_VERSION, 'draw': saved, 'message': f'{r}회 당첨번호를 저장했습니다.'}
 
-@app.post('/api/draws')
+@router.post('/api/draws')
 def save_draw(req:DrawReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     r, nums, bonus, expected, completed = _rc315_validate_draw_payload(req.round_no, req.numbers, req.bonus, allow_completed_only=True)
@@ -271,17 +271,17 @@ def _auto_check_round(admin, req:AutoWinReq, request:Request):
     log_action(admin,'AUTO_WIN_CHECK',f'{req.round_no}회차 회원별 자동 당첨확인 {len(member_results)}명/{len(checked)}조합',request)
     return {'ok':True, 'round_no':req.round_no, 'wins':wins, 'bonus':int(req.bonus), 'draw_date':req.draw_date, 'auto_resolved': bool(resolved), 'summary':summary, 'member_results':member_results, 'results':checked[:300]}
 
-@app.post('/api/check_winning')
+@router.post('/api/check_winning')
 def check_winning_alias(req:AutoWinReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     return _auto_check_round(admin, req, request)
 
-@app.post('/api/win-check-auto')
+@router.post('/api/win-check-auto')
 def win_check_auto(req:AutoWinReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     return _auto_check_round(admin, req, request)
 
-@app.get('/api/stats')
+@router.get('/api/stats')
 def api_stats(limit:int=100, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     st=latest_stats(limit)

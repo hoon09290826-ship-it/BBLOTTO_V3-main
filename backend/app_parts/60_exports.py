@@ -1,24 +1,24 @@
 # Extracted from legacy backend/app.py lines 3408-3921.
-@app.get('/api/export/members_csv')
+@router.get('/api/export/members_csv')
 def export_members_csv(token: str|None=None, authorization: str|None = Header(default=None)):
     require_admin_any(authorization, token)
     with con() as c:
         rows=c.execute("SELECT m.id,m.name,m.phone,m.grade,m.status,COALESCE(m.priority,'보통') priority,COALESCE(m.source,'직접등록') source,m.last_contact_at,m.memo,m.created_at,COALESCE(m.contract_end_at,'') contract_end_at,COALESCE(m.contract_months,12) contract_months,COALESCE(a.name,a.username,'미지정') registered_by_name FROM members m LEFT JOIN admins a ON a.id=COALESCE(m.created_by,0) ORDER BY m.id DESC").fetchall()
     return csv_response('BBLOTTO_members.csv', ['ID','이름','연락처','등급','상태','우선순위','유입경로','최근연락','메모','등록일','계약만료일','등록관리자'], [[r['id'],r['name'],r['phone'],r['grade'],r['status'],r['priority'],r['source'],r['last_contact_at'],r['memo'],r['created_at'],r['contract_end_at'],r['registered_by_name']] for r in rows])
 
-@app.get('/api/export/recommendations_csv')
+@router.get('/api/export/recommendations_csv')
 def export_recommendations_csv(token: str|None=None, authorization: str|None = Header(default=None)):
     require_admin_any(authorization, token)
     with con() as c: rows=c.execute('SELECT id,member_name,round_no,mode,count,numbers,analysis,created_at FROM recommendations ORDER BY id DESC').fetchall()
     return csv_response('BBLOTTO_recommendations.csv', ['ID','회원','회차','모드','조합수','추천번호','분석','생성일'], [[r['id'],r['member_name'],r['round_no'],r['mode'],r['count'],r['numbers'],r['analysis'],r['created_at']] for r in rows])
 
-@app.get('/api/export/winning_csv')
+@router.get('/api/export/winning_csv')
 def export_winning_csv(token: str|None=None, authorization: str|None = Header(default=None)):
     require_admin_any(authorization, token)
     with con() as c: rows=c.execute('SELECT round_no,member_name,target_numbers,win_numbers,bonus,rank,prize,cost,profit,roi,created_at FROM winning_checks ORDER BY id DESC').fetchall()
     return csv_response('BBLOTTO_winning_checks.csv', ['회차','회원','추천번호','당첨번호','보너스','등수','당첨금','구매금','수익','수익률','확인일'], [[r['round_no'],r['member_name'],r['target_numbers'],r['win_numbers'],r['bonus'],r['rank'],r['prize'],r['cost'],r['profit'],r['roi'],r['created_at']] for r in rows])
 
-@app.get('/api/backup_db')
+@router.get('/api/backup_db')
 def backup_db(token: str|None=None, authorization: str|None = Header(default=None)):
     admin = require_admin_any(authorization, token)
     if DB_ENGINE == 'postgresql':
@@ -26,7 +26,7 @@ def backup_db(token: str|None=None, authorization: str|None = Header(default=Non
         return FileResponse(EXPORT_DIR / b['filename'], media_type='application/json', filename=b['filename'])
     return FileResponse(DB, media_type='application/octet-stream', filename='BBLOTTO_lotto_backup.db')
 
-@app.get('/api/export/excel')
+@router.get('/api/export/excel')
 def export_excel(token: str|None=None, authorization: str|None = Header(default=None)):
     require_admin_any(authorization, token)
     try:
@@ -100,7 +100,7 @@ def export_excel(token: str|None=None, authorization: str|None = Header(default=
     return StreamingResponse(bio, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition':'attachment; filename=BBLOTTO_PRO_V34_FINAL_REPORT.xlsx'})
 
 
-@app.get('/api/export/report_txt')
+@router.get('/api/export/report_txt')
 def export_report_txt(token: str|None=None, authorization: str|None = Header(default=None)):
     require_admin_any(authorization, token)
     auth_header = authorization or ('Bearer '+token if token else None)
@@ -120,7 +120,7 @@ def export_report_txt(token: str|None=None, authorization: str|None = Header(def
     raw='\n'.join(lines).encode('utf-8-sig')
     return StreamingResponse(io.BytesIO(raw), media_type='text/plain; charset=utf-8', headers={'Content-Disposition':'attachment; filename=BBLOTTO_PRO_V34_FINAL_REPORT.txt'})
 
-@app.get('/api/export/final_bundle')
+@router.get('/api/export/final_bundle')
 def export_final_bundle(token: str|None=None, authorization: str|None = Header(default=None)):
     require_admin_any(authorization, token)
     import zipfile
@@ -141,7 +141,7 @@ def export_final_bundle(token: str|None=None, authorization: str|None = Header(d
     bio.seek(0)
     return StreamingResponse(bio, media_type='application/zip', headers={'Content-Disposition':'attachment; filename=BBLOTTO_PRO_V34_FINAL_EXPORT_BUNDLE.zip'})
 
-@app.get('/api/export/pdf')
+@router.get('/api/export/pdf')
 def export_pdf(token: str|None=None, authorization: str|None = Header(default=None)):
     require_admin_any(authorization, token)
     # 외부 라이브러리 없이 간단한 PDF 리포트 생성(영문/숫자 중심, 한글 상세는 엑셀 사용 권장)
@@ -171,7 +171,7 @@ def export_pdf(token: str|None=None, authorization: str|None = Header(default=No
 class TextPdfReq(BaseModel):
     text:str=''
 
-@app.post('/api/export_pdf')
+@router.post('/api/export_pdf')
 def export_text_pdf(req:TextPdfReq, authorization: str|None = Header(default=None), x_token: str|None = Header(default=None)):
     require_admin_any(authorization, x_token)
     # 간단 PDF: 한글은 환경에 따라 제한될 수 있어 텍스트 파일에 가까운 PDF 구조로 저장합니다.

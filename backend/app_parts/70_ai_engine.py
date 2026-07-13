@@ -1,5 +1,5 @@
 # Extracted from legacy backend/app.py lines 3922-4849.
-@app.get('/api/ai-engine/summary')
+@router.get('/api/ai-engine/summary')
 def ai_engine_summary(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     st=latest_stats(120)

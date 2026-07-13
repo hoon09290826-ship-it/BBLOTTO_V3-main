@@ -1,5 +1,5 @@
 # Extracted from legacy backend/app.py lines 2109-2531.
-@app.post('/api/login')
+@router.post('/api/login')
 def login(req:LoginReq, request:Request):
     username = str(req.username or '').strip()[:80]
     if not username or not req.password or len(str(req.password)) > 256:
@@ -40,13 +40,13 @@ def login(req:LoginReq, request:Request):
     log_login_event(admin['id'], admin['username'], 1, '로그인 성공', request)
     return {'token':token,'admin':{'id':admin['id'],'username':admin['username'],'name':admin['name'],'role':admin['role'] if 'role' in admin.keys() else '전체권한','is_super_admin':is_super_admin(admin)},'expires_at':exp,'expires_in_seconds':timeout_minutes*60,'session_timeout_minutes':timeout_minutes}
 
-@app.post('/api/logout')
+@router.post('/api/logout')
 def logout(request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); token=authorization.split(' ',1)[1].strip()
     with con() as c: c.execute('DELETE FROM sessions WHERE token=?',(token,)); c.commit()
     log_action(admin,'LOGOUT','관리자 로그아웃',request); return {'ok':True}
 
-@app.get('/api/me')
+@router.get('/api/me')
 def me(authorization: str|None = Header(default=None)):
     a=require_admin(authorization)
     
@@ -59,7 +59,7 @@ def me(authorization: str|None = Header(default=None)):
     return {'id':a['id'],'username':a['username'],'name':a['name'],'phone':a.get('phone',''),'memo':a.get('memo',''),'role':a.get('role','전체권한'),'is_super_admin':is_super_admin(a),'expires_at':a.get('expires_at',''),'expires_in_seconds':left_seconds,'last_seen_at':a.get('last_seen_at',''),'last_login_at':a.get('last_login_at',''),'last_ip':a.get('last_ip','')}
 
 
-@app.put('/api/me')
+@router.put('/api/me')
 def update_my_account(req:MyAccountReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     fields=[]; vals=[]
@@ -86,13 +86,13 @@ def update_my_account(req:MyAccountReq, request:Request, authorization: str|None
     log_action(admin, action, '본인 계정 정보 수정', request)
     return {'ok':True,'changed':1}
 
-@app.get('/api/admins')
+@router.get('/api/admins')
 def admins(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c: rows=c.execute('SELECT id,username,name,phone,role,memo,is_active,created_at,updated_at,last_login_at,last_ip FROM admins ORDER BY id').fetchall()
     return [dict(r) for r in rows]
 
-@app.post('/api/admins')
+@router.post('/api/admins')
 def create_admin(req:AdminReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     require_super_admin(admin)
@@ -112,7 +112,7 @@ def create_admin(req:AdminReq, request:Request, authorization: str|None = Header
             raise HTTPException(400,'이미 존재하는 관리자 아이디입니다.')
         raise
 
-@app.delete('/api/admins/{admin_id}')
+@router.delete('/api/admins/{admin_id}')
 def delete_admin(admin_id:int, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     require_super_admin(admin)
@@ -132,7 +132,7 @@ def delete_admin(admin_id:int, request:Request, authorization: str|None = Header
     return {'ok':True,'deleted':admin_id}
 
 
-@app.get('/api/admins/{admin_id}')
+@router.get('/api/admins/{admin_id}')
 def admin_detail(admin_id:int, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     if not is_super_admin(admin) and int(admin_id) != int(admin['id']):
@@ -144,7 +144,7 @@ def admin_detail(admin_id:int, authorization: str|None = Header(default=None)):
     data=dict(row); data['recent_logs']=[dict(r) for r in recent]
     return data
 
-@app.put('/api/admins/{admin_id}')
+@router.put('/api/admins/{admin_id}')
 def update_admin(admin_id:int, req:AdminUpdateReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     is_self = int(admin_id) == int(admin['id'])
@@ -193,7 +193,7 @@ def update_admin(admin_id:int, req:AdminUpdateReq, request:Request, authorizatio
     log_action(admin,'UPDATE_ADMIN',f'관리자 수정 ID {admin_id}',request)
     return {'ok':True, 'changed':1}
 
-@app.post('/api/admins/{admin_id}/activate')
+@router.post('/api/admins/{admin_id}/activate')
 def activate_admin(admin_id:int, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     require_super_admin(admin)
@@ -202,7 +202,7 @@ def activate_admin(admin_id:int, request:Request, authorization: str|None = Head
     log_action(admin,'ACTIVATE_ADMIN',f'관리자 활성화 ID {admin_id}',request)
     return {'ok':True}
 
-@app.post('/api/sessions/cleanup')
+@router.post('/api/sessions/cleanup')
 def cleanup_sessions(request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
     with con() as c:
@@ -210,7 +210,7 @@ def cleanup_sessions(request:Request, authorization: str|None = Header(default=N
     log_action(admin,'CLEANUP_SESSIONS',f'만료 세션 정리 {deleted}건',request)
     return {'ok':True,'deleted':deleted}
 
-@app.get('/api/security_status')
+@router.get('/api/security_status')
 def security_status(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
     with con() as c:
@@ -220,7 +220,7 @@ def security_status(authorization: str|None = Header(default=None)):
         warn = c.execute('SELECT value FROM settings WHERE key=?', ('auto_logout_warning_minutes',)).fetchone()
     return {'ok':True,'active_sessions':active_sessions,'failed_login_today':failed_today,'session_timeout_minutes':int((timeout or {'value':600})['value'] or 600),'auto_logout_warning_minutes':int((warn or {'value':5})['value'] or 5),'is_super_admin':is_super_admin(admin),'password_hash':'PBKDF2-SHA256/260000','login_limit':'7회/15분','security_headers':True,'origin_check':True,'request_size_limit_mb':2}
 
-@app.get('/api/sessions')
+@router.get('/api/sessions')
 def list_sessions(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     require_super_admin(admin)
@@ -233,7 +233,7 @@ def list_sessions(authorization: str|None = Header(default=None)):
         d=dict(r); d['token_tail']=str(d.pop('token'))[-8:]; out.append(d)
     return out
 
-@app.delete('/api/sessions/{token_tail}')
+@router.delete('/api/sessions/{token_tail}')
 def revoke_session(token_tail:str, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     require_super_admin(admin)
@@ -253,7 +253,7 @@ def revoke_session(token_tail:str, request:Request, authorization: str|None = He
     return {'ok':True,'deleted':deleted}
 
 
-@app.get('/api/dashboard')
+@router.get('/api/dashboard')
 def dashboard(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
@@ -265,7 +265,7 @@ def dashboard(authorization: str|None = Header(default=None)):
     roi=round((checks['profit']/checks['cost']*100),2) if checks['cost'] else 0
     return {'members':members,'admins':admins_count,'recommendations':recs,'checks':checks['c'],'total_prize':checks['prize'],'total_cost':checks['cost'],'total_profit':checks['profit'],'roi':roi,'latest_draw':dict(latest) if latest else None}
 
-@app.get('/api/dashboard_summary')
+@router.get('/api/dashboard_summary')
 def dashboard_summary(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
@@ -281,21 +281,21 @@ def dashboard_summary(authorization: str|None = Header(default=None)):
         status_rows=c.execute('SELECT COALESCE(status,"활성") label, COUNT(*) c FROM members GROUP BY COALESCE(status,"활성")').fetchall()
     return {'members':members,'active_members':active_members,'vip_members':vip_members,'high_priority_members':high_priority,'recommendations':recs,'sms':sms,'latest_round': latest['round_no'] if latest else None,'recent_recommendations':[dict(r) for r in recent],'grade_counts':{r['label']:r['c'] for r in grade_rows},'status_counts':{r['label']:r['c'] for r in status_rows}}
 
-@app.get('/api/settings')
+@router.get('/api/settings')
 def get_settings(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
         rows=c.execute('SELECT key,value,updated_at FROM settings').fetchall()
     return {r['key']:{'value':clean_template_text(r['value']) if r['key']=='sms_template' else r['value'],'updated_at':r['updated_at']} for r in rows}
 
-@app.get('/api/template')
+@router.get('/api/template')
 def get_template(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
         r=c.execute('SELECT value,updated_at FROM settings WHERE key=?', ('sms_template',)).fetchone()
     return {'body': clean_template_text(r['value'] if r else ''), 'updated_at': r['updated_at'] if r else ''}
 
-@app.post('/api/template')
+@router.post('/api/template')
 def save_template(req: dict, request: Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     body=clean_template_text(req.get('body') or req.get('value') or '')
@@ -305,7 +305,7 @@ def save_template(req: dict, request: Request, authorization: str|None = Header(
     log_action(admin,'SAVE_TEMPLATE','회원 안내 문구 템플릿 저장',request)
     return {'ok': True, 'body': body}
 
-@app.post('/api/settings')
+@router.post('/api/settings')
 def save_setting(req:SettingReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     allowed={'sms_template','sms_provider','sms_sender','sms_api_url','sms_api_key','session_timeout_minutes','auto_logout_warning_minutes'}
@@ -317,7 +317,7 @@ def save_setting(req:SettingReq, request:Request, authorization: str|None = Head
     log_action(admin,'SAVE_SETTING',f'설정 저장: {req.key}',request)
     return {'ok':True,'key':req.key}
 
-@app.get('/api/admin-stats')
+@router.get('/api/admin-stats')
 def admin_stats(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
     with con() as c:
@@ -329,13 +329,13 @@ def admin_stats(authorization: str|None = Header(default=None)):
           FROM admins a LEFT JOIN admin_logs l ON a.id=l.admin_id GROUP BY a.id ORDER BY a.id''').fetchall()
     return [dict(r) for r in rows]
 
-@app.get('/api/admin-logs')
+@router.get('/api/admin-logs')
 def admin_logs(limit:int=100, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
     with con() as c: rows=c.execute('SELECT * FROM admin_logs ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
     return [dict(r) for r in rows]
 
-@app.get('/api/admin-overview')
+@router.get('/api/admin-overview')
 def admin_overview(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
     with con() as c:
@@ -348,7 +348,7 @@ def admin_overview(authorization: str|None = Header(default=None)):
         latest_backup = c.execute('SELECT * FROM backup_history ORDER BY id DESC LIMIT 1').fetchone()
     return {'active_admins':active_admins,'active_sessions':active_sessions,'today_logins':today_logins,'today_actions':today_actions,'backup_count':backups['c'],'backup_size':backups['size'],'latest_backup':dict(latest_backup) if latest_backup else None}
 
-@app.get('/api/backups')
+@router.get('/api/backups')
 def backup_list(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
     known = set()
@@ -363,14 +363,14 @@ def backup_list(authorization: str|None = Header(default=None)):
                 rows.append({'id':None,'filename':f.name,'reason':'file','size_bytes':f.stat().st_size,'created_by':None,'created_at':datetime.datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S'), 'format': f.suffix.lstrip('.')})
     return rows[:100]
 
-@app.post('/api/backups/create')
+@router.post('/api/backups/create')
 def backup_create(request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
     b=create_db_backup('manual', admin)
     log_action(admin, 'CREATE_BACKUP', f'DB 백업 생성: {b["filename"]}', request)
     return b
 
-@app.post('/api/backups/restore/{filename}')
+@router.post('/api/backups/restore/{filename}')
 def backup_restore(filename:str, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
     safe = Path(filename).name
@@ -378,7 +378,7 @@ def backup_restore(filename:str, request:Request, authorization: str|None = Head
     result = _restore_json_backup(path, admin, request)
     return result
 
-@app.get('/api/backups/validate/{filename}')
+@router.get('/api/backups/validate/{filename}')
 def backup_validate(filename:str, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
     safe = Path(filename).name
@@ -387,7 +387,7 @@ def backup_validate(filename:str, authorization: str|None = Header(default=None)
     tables = data.get('tables') or {}
     return {'ok': True, 'filename': safe, 'engine': data.get('engine'), 'created_at': data.get('created_at'), 'table_counts': {k: len(v or []) for k, v in tables.items()}}
 
-@app.post('/api/backups/cleanup')
+@router.post('/api/backups/cleanup')
 def backup_cleanup(keep:int=20, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
     keep = max(3, min(int(keep or 20), 100))
@@ -403,7 +403,7 @@ def backup_cleanup(keep:int=20, authorization: str|None = Header(default=None)):
             pass
     return {'ok': True, 'keep': keep, 'removed': removed, 'remaining': len(files)-len(removed)}
 
-@app.get('/api/rc3-4/status')
+@router.get('/api/rc3-4/status')
 def rc3_4_status(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     with con() as c:
@@ -411,7 +411,7 @@ def rc3_4_status(authorization: str|None = Header(default=None)):
         latest = c.execute('SELECT * FROM backup_history ORDER BY id DESC LIMIT 1').fetchone()
     return {'ok': True, 'version': 'RC3-4_BACKUP_RESTORE', 'engine': DB_ENGINE, 'backup_dir': str(EXPORT_DIR), 'backup_count': hist['c'] if hist else 0, 'backup_size': hist['size'] if hist else 0, 'latest_backup': dict(latest) if latest else None, 'supports': ['json_backup', 'json_restore', 'sqlite_db_download', 'postgresql_export']}
 
-@app.get('/api/backups/download/{filename}')
+@router.get('/api/backups/download/{filename}')
 def backup_download(filename:str, token: str|None=None, authorization: str|None = Header(default=None)):
     require_admin_any(authorization, token)
     safe = Path(filename).name

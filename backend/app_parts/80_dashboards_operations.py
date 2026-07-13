@@ -1,5 +1,5 @@
 # Extracted from legacy backend/app.py lines 4850-5411.
-@app.get('/api/engine/insights')
+@router.get('/api/engine/insights')
 def engine_insights(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     ensure_sprint23_schema()
@@ -28,7 +28,7 @@ def engine_insights(authorization: str|None = Header(default=None)):
         'summary':'최근 100회 통계와 추천 생성 이력을 기준으로 엔진 상태를 표시합니다.'
     }
 
-@app.get('/api/dashboard_v2')
+@router.get('/api/dashboard_v2')
 def dashboard_v2(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     ensure_sprint23_schema()
@@ -51,7 +51,7 @@ def dashboard_v2(authorization: str|None = Header(default=None)):
 
 # generate 라우트가 만든 recommendations 저장 직후 engine_runs에도 보조 기록되도록 DB insert를 후킹하지 않고,
 # 추천 상세 조회 시 누락된 실행 이력을 보강하는 안전 API를 제공합니다.
-@app.post('/api/engine/backfill_runs')
+@router.post('/api/engine/backfill_runs')
 def backfill_engine_runs(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     ensure_sprint23_schema()
@@ -91,7 +91,7 @@ def _rc44_rows(c, sql, params=(), limit=20):
 def _rc44_today_like():
     return datetime.datetime.now().strftime('%Y-%m-%d') + '%'
 
-@app.get('/api/rc4-4/admin-dashboard')
+@router.get('/api/rc4-4/admin-dashboard')
 def rc44_admin_dashboard(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     today = _rc44_today_like()
@@ -141,7 +141,7 @@ def rc44_admin_dashboard(authorization: str|None = Header(default=None)):
         'recent_wins': recent_wins, 'alerts': alerts
     }
 
-@app.get('/api/rc4-4/ai-status')
+@router.get('/api/rc4-4/ai-status')
 def rc44_ai_status(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     today = _rc44_today_like()
@@ -154,7 +154,7 @@ def rc44_ai_status(authorization: str|None = Header(default=None)):
         recent_runs = _rc44_rows(c, 'SELECT recommendation_id,round_no,mode,count,avg_score,engine_version,created_at FROM engine_runs ORDER BY id DESC LIMIT 20', limit=20)
     return {'ok': True, 'version': RC4_4_VERSION, 'by_grade': by_grade, 'by_mode': by_mode, 'today': today_rows, 'recent_runs': recent_runs}
 
-@app.get('/api/rc4-4/member-dashboard')
+@router.get('/api/rc4-4/member-dashboard')
 def rc44_member_dashboard(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
@@ -167,7 +167,7 @@ def rc44_member_dashboard(authorization: str|None = Header(default=None)):
                               ORDER BY rec_count DESC, m.id DESC LIMIT 10""", limit=10)
     return {'ok': True, 'version': RC4_4_VERSION, 'grade': grade, 'status': status, 'priority': priority, 'top_members': top}
 
-@app.post('/api/rc4-4/auto-update')
+@router.post('/api/rc4-4/auto-update')
 def rc44_auto_update(backfill:int=12, request:Request=None, authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     result = {'ok': True, 'version': RC4_4_VERSION, 'steps': []}
@@ -260,7 +260,7 @@ def _s3_sync_recent_draws(backfill=12):
         'message': '동행복권 공개 데이터 기준으로 최근 회차 자동 동기화를 시도했습니다.'
     }
 
-@app.post('/api/draws/sync')
+@router.post('/api/draws/sync')
 def sprint3_sync_draws(backfill:int=12, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     result=_s3_sync_recent_draws(backfill)
@@ -268,7 +268,7 @@ def sprint3_sync_draws(backfill:int=12, authorization: str|None = Header(default
     except Exception: pass
     return result
 
-@app.get('/api/draws/status_v2')
+@router.get('/api/draws/status_v2')
 def sprint3_draw_status_v2(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     expected = expected_lotto_round()
@@ -284,7 +284,7 @@ def sprint3_draw_status_v2(authorization: str|None = Header(default=None)):
         'summary': '현재 관리 회차와 당첨번호 저장 상태를 자동으로 판정합니다.'
     }
 
-@app.get('/api/stats/round100')
+@router.get('/api/stats/round100')
 def sprint3_stats_round100(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     st = latest_stats(100)
@@ -309,7 +309,7 @@ def sprint3_stats_round100(authorization: str|None = Header(default=None)):
         'summary': '최근 100회 기준 빈도/미출현/동반출현/구간/끝수/합계 흐름을 통합 계산했습니다.'
     }
 
-@app.get('/api/mobile/status')
+@router.get('/api/mobile/status')
 def sprint3_mobile_status(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
@@ -365,7 +365,7 @@ def _s4_required_files():
         rows.append({'path': rel, 'exists': p.exists(), 'size_bytes': p.stat().st_size if p.exists() else 0})
     return rows
 
-@app.get('/api/ops/health')
+@router.get('/api/ops/health')
 def sprint4_ops_health(authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     counts = {}
@@ -399,7 +399,7 @@ def sprint4_ops_health(authorization: str|None = Header(default=None)):
     }
     return response
 
-@app.post('/api/ops/backup/create')
+@router.post('/api/ops/backup/create')
 def sprint4_ops_backup_create(request:Request, authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     b = create_db_backup('sprint4_manual', admin)
@@ -407,7 +407,7 @@ def sprint4_ops_backup_create(request:Request, authorization: str|None = Header(
     except Exception: pass
     return {'ok': True, 'version': SPRINT4_VERSION, 'backup': b}
 
-@app.post('/api/ops/backups/cleanup')
+@router.post('/api/ops/backups/cleanup')
 def sprint4_ops_backups_cleanup(keep:int=10, authorization: str|None = Header(default=None)):
     admin = require_admin(authorization); require_super_admin(admin)
     keep = max(3, min(int(keep or 10), 50))
@@ -421,7 +421,7 @@ def sprint4_ops_backups_cleanup(keep:int=10, authorization: str|None = Header(de
             pass
     return {'ok': True, 'version': SPRINT4_VERSION, 'keep': keep, 'removed': removed, 'remaining': len(files)-len(removed)}
 
-@app.get('/api/ops/audit/recent')
+@router.get('/api/ops/audit/recent')
 def sprint4_ops_audit_recent(limit:int=100, authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     limit = max(10, min(int(limit or 100), 500))
@@ -429,7 +429,7 @@ def sprint4_ops_audit_recent(limit:int=100, authorization: str|None = Header(def
         logs = c.execute('SELECT id,username,action,detail,ip,created_at FROM admin_logs ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
     return {'ok': True, 'version': SPRINT4_VERSION, 'logs': [dict(r) for r in logs]}
 
-@app.get('/api/ops/validation')
+@router.get('/api/ops/validation')
 def sprint4_ops_validation(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     files = _s4_required_files()
@@ -482,7 +482,7 @@ def _s5_requirements_check():
     content = req.read_text(encoding='utf-8', errors='ignore').lower() if req.exists() else ''
     return [{'package': n, 'ok': n.lower() in content} for n in needed]
 
-@app.get('/api/release/readiness')
+@router.get('/api/release/readiness')
 def sprint5_release_readiness(authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     files = _s5_deploy_files()
@@ -515,7 +515,7 @@ def sprint5_release_readiness(authorization: str|None = Header(default=None)):
         'summary': 'Sprint 5 출시/배포 준비 상태 점검 결과입니다.'
     }
 
-@app.get('/api/release/checklist')
+@router.get('/api/release/checklist')
 def sprint5_release_checklist(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     return {

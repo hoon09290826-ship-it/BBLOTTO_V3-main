@@ -1,5 +1,5 @@
 # Extracted from legacy backend/app.py lines 7880-7985.
-@app.get('/api/ai-engine/rc9-audit')
+@router.get('/api/ai-engine/rc9-audit')
 def rc9_engine_audit(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     from .ai_engine_v7 import rc9_audit

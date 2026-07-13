@@ -1,5 +1,5 @@
 # Extracted from legacy backend/app.py lines 6942-7879.
-@app.get('/api/rc6-11/status')
+@router.get('/api/rc6-11/status')
 def rc6_11_status(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     return {'ok': True, 'version': 'RC6-11_MEMBER_QUERY_REAL_FIX', 'engine': DB_ENGINE, 'admin': admin.get('username')}
@@ -75,7 +75,7 @@ def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
             clean.append(line)
     return '\n'.join(clean[:4])
 
-@app.get('/api/rc7-1/status')
+@router.get('/api/rc7-1/status')
 def rc7_1_status(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     return {'ok': True, 'version': RC71_ENGINE_VERSION, 'engine': DB_ENGINE, 'summary': '회원별 추천번호/분석요약 분산 엔진 적용', 'admin': admin.get('username')}
@@ -119,7 +119,7 @@ def _smsganda_cell_text(value):
     text = re.sub(r'\n{3,}', '\n\n', text).strip()
     return text.replace('\n', '\u2028')
 
-@app.post('/api/export/smsganda_xls')
+@router.post('/api/export/smsganda_xls')
 def export_smsganda_real_xls(req: SmsGandaXlsReq, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     try:
@@ -207,7 +207,7 @@ def export_smsganda_real_xls(req: SmsGandaXlsReq, authorization: str|None = Head
 
 
 # ===================== RC7-5 SMSGANDA TXT CP949 EXPORT =====================
-@app.post('/api/export/smsganda_txt')
+@router.post('/api/export/smsganda_txt')
 def export_smsganda_txt(req: SmsGandaXlsReq, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     cleaned=[]
@@ -241,28 +241,28 @@ def export_smsganda_txt(req: SmsGandaXlsReq, authorization: str|None = Header(de
         headers={'Content-Disposition': f"attachment; filename={ascii_filename}; filename*=UTF-8''{quoted}"}
     )
 
-@app.get('/api/rc7-5/status')
+@router.get('/api/rc7-5/status')
 def rc7_5_status(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     return {'ok': True, 'version': 'RC7-5 SMSGANDA TXT CP949', 'engine': DB_ENGINE, 'summary': '문자간다 TXT ANSI/CP949 주소록 생성 기본 지원', 'admin': admin.get('username')}
 
-@app.get('/api/rc7-6/status')
+@router.get('/api/rc7-6/status')
 def rc7_6_status(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     return {'ok': True, 'version': 'RC7-6 SMSGANDA TEMPLATE XLS', 'engine': DB_ENGINE, 'summary': '문자간다 샘플 XLS 헤더 형식(이름/휴대전화/[*1*]~[*4*]) 적용', 'admin': admin.get('username')}
 
-@app.get('/api/rc7-8/status')
+@router.get('/api/rc7-8/status')
 def rc7_8_status(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     return {'ok': True, 'version': 'RC7-8 SMSGANDA SEND CENTER', 'engine': DB_ENGINE, 'summary': '문자간다 [*1*]~[*4*] 문구 분리/수정/미리보기/XLS 연동 적용', 'admin': admin.get('username')}
 # ===================== /RC7-5 SMSGANDA TXT CP949 EXPORT =====================
 
-@app.get('/api/rc7-4/status')
+@router.get('/api/rc7-4/status')
 def rc7_4_status(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     return {'ok': True, 'version': 'RC7-4 SMSGANDA HEADER FIX', 'engine': DB_ENGINE, 'summary': '문자간다 XLS 다운로드 한글 파일명 헤더 오류 수정', 'admin': admin.get('username')}
 
-@app.get('/api/rc7-3/status')
+@router.get('/api/rc7-3/status')
 def rc7_3_status(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     return {'ok': True, 'version': 'RC7-3 SMSGANDA REAL XLS', 'engine': DB_ENGINE, 'summary': '문자간다 샘플 기준 Excel 97-2003 BIFF .xls 주소록 생성', 'admin': admin.get('username')}
@@ -270,7 +270,7 @@ def rc7_3_status(authorization: str|None = Header(default=None)):
 
 
 # ===================== RC7-2 SMSGANDA XLS EXPORT =====================
-@app.get('/api/rc7-2/status')
+@router.get('/api/rc7-2/status')
 def rc7_2_status(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     return {'ok': True, 'version': 'RC7-2 SMSGANDA XLS', 'engine': DB_ENGINE, 'summary': '문자간다 A열 이름/B열 전화번호 XLS 업로드 파일 생성 지원', 'admin': admin.get('username')}
@@ -698,7 +698,7 @@ try:
     from .ai_engine_v7 import get_analysis_cache as _ai_v6_get_analysis_cache
     BBLOTTO_AI_V6_ENGINE_VERSION = 'BBLOTTO_RC10_AUTO_FULL_HISTORY'
 
-    @app.get('/api/ai-engine/v6-cache')
+    @router.get('/api/ai-engine/v6-cache')
     def ai_engine_v6_cache(authorization: str|None = Header(default=None), force: int = 0, target_round: int|None = None):
         require_admin(authorization)
         cache = _ai_v6_get_analysis_cache(bool(force), target_round=target_round)
@@ -728,7 +728,7 @@ except Exception as _v6_import_error:
 try:
     from .ai_engine_v7 import sync_official_full_history as _ai_v6_sync_official_full_history
 
-    @app.post('/api/ai-engine/v6-sync-full')
+    @router.post('/api/ai-engine/v6-sync-full')
     def ai_engine_v6_sync_full(authorization: str|None = Header(default=None), max_round: int|None = None):
         require_admin(authorization)
         return _ai_v6_sync_official_full_history(max_round=max_round)
@@ -745,7 +745,7 @@ try:
     from .ai_engine_v7 import sync_official_full_history as _bb_v6_sync_full_ui
     from .ai_engine_v7 import get_analysis_cache as _bb_v6_cache_ui
 
-    @app.post('/api/admin/ai-v6/full-sync')
+    @router.post('/api/admin/ai-v6/full-sync')
     def admin_ai_v6_full_sync(authorization: str|None = Header(default=None), max_round: int|None = None):
         require_admin(authorization)
         sync_result = _bb_v6_sync_full_ui(max_round=max_round)
@@ -773,7 +773,7 @@ try:
 
     from .ai_engine_v7 import sync_official_history_step as _bb_v6_sync_step_ui
 
-    @app.post('/api/admin/ai-v6/full-sync-step')
+    @router.post('/api/admin/ai-v6/full-sync-step')
     def admin_ai_v6_full_sync_step(authorization: str|None = Header(default=None), max_round: int|None = None, chunk_size: int = 25):
         require_admin(authorization)
         try:
@@ -789,7 +789,7 @@ try:
                 'retryable': True,
             }
 
-    @app.get('/api/admin/ai-v6/cache-status')
+    @router.get('/api/admin/ai-v6/cache-status')
     def admin_ai_v6_cache_status(authorization: str|None = Header(default=None), target_round: int|None = None):
         require_admin(authorization)
         cache = _bb_v6_cache_ui(False, target_round=target_round)
@@ -808,7 +808,7 @@ try:
             'missing_rounds_sample': cache.get('missing_rounds_sample'),
         }
 
-    @app.get('/admin/sync-full-history')
+    @router.get('/admin/sync-full-history')
     def admin_sync_full_history_url_notice(authorization: str|None = Header(default=None), max_round: int|None = None):
         # 브라우저 주소창 직접 입력 시 기존처럼 Not Found가 나오지 않도록 안내한다.
         # 실제 실행은 로그인 후 관리자 화면 버튼 또는 Authorization 헤더가 있는 요청에서만 가능하다.

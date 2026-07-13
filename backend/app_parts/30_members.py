@@ -1,5 +1,5 @@
 # Extracted from legacy backend/app.py lines 2532-2872.
-@app.get('/api/members')
+@router.get('/api/members')
 def list_members(q:str='', status:str='', grade:str='', priority:str='', sort:str='priority', limit:int=5000, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     wh=[]; args=[]
@@ -73,7 +73,7 @@ def list_members(q:str='', status:str='', grade:str='', priority:str='', sort:st
         rows=c.execute(sql, final_args).fetchall()
     return [dict(r) for r in rows]
 
-@app.get('/api/members_summary')
+@router.get('/api/members_summary')
 def members_summary(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     scope_sql, scope_args = member_scope_condition(admin)
@@ -87,7 +87,7 @@ def members_summary(authorization: str|None = Header(default=None)):
     return {'total':total,'grade':{r['label']:r['c'] for r in grade},'status':{r['label']:r['c'] for r in status},'priority':{r['label']:r['c'] for r in priority},'no_contact':no_contact,'is_super_admin':is_super_admin(admin)}
 
 
-@app.get('/api/members_manage_overview')
+@router.get('/api/members_manage_overview')
 def members_manage_overview(authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     scope_sql, scope_args = member_scope_condition(admin)
@@ -102,7 +102,7 @@ def members_manage_overview(authorization: str|None = Header(default=None)):
     return {'total':total,'active':active,'paused':paused,'closed':closed,'status_counts':{r['label']:r['c'] for r in status_rows},'recent':[dict(r) for r in recent],'is_super_admin':is_super_admin(admin)}
 
 
-@app.post('/api/members/{member_id}/status')
+@router.post('/api/members/{member_id}/status')
 def change_member_status(member_id:int, req:MemberStatusReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     allowed={'활성','상담중','휴면','정지','종료','탈퇴'}
@@ -117,7 +117,7 @@ def change_member_status(member_id:int, req:MemberStatusReq, request:Request, au
     log_action(admin,'CHANGE_MEMBER_STATUS',f'회원 상태 변경: {m["name"]} / {m["status"] or "활성"} -> {req.status}',request)
     return {'ok':True,'id':member_id,'status':req.status}
 
-@app.post('/api/members/bulk_status')
+@router.post('/api/members/bulk_status')
 def bulk_member_status(req:MemberBulkStatusReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     allowed={'활성','상담중','휴면','정지','종료','탈퇴'}
@@ -138,7 +138,7 @@ def bulk_member_status(req:MemberBulkStatusReq, request:Request, authorization: 
     log_action(admin,'BULK_MEMBER_STATUS',f'회원 {len(rows)}명 상태 일괄 변경 -> {req.status}',request)
     return {'ok':True,'changed':len(rows),'status':req.status}
 
-@app.post('/api/members')
+@router.post('/api/members')
 def add_member(req:MemberReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     created_at = normalize_date_text(req.created_at, datetime.datetime.now().strftime('%Y-%m-%d')) if is_super_admin(admin) else datetime.datetime.now().strftime('%Y-%m-%d')
@@ -157,7 +157,7 @@ def add_member(req:MemberReq, request:Request, authorization: str|None = Header(
         c.commit(); mid=cur.lastrowid
     log_action(admin,'CREATE_MEMBER',f'회원 등록: {req.name}',request); return {'id':mid}
 
-@app.delete('/api/members/{member_id}')
+@router.delete('/api/members/{member_id}')
 def del_member(member_id:int, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     with con() as c:
@@ -165,7 +165,7 @@ def del_member(member_id:int, request:Request, authorization: str|None = Header(
         c.execute('DELETE FROM members WHERE id=?',(member_id,)); c.commit()
     log_action(admin,'DELETE_MEMBER',f'회원 삭제 ID {member_id}',request); return {'ok':True}
 
-@app.put('/api/members/{member_id}')
+@router.put('/api/members/{member_id}')
 def update_member(member_id:int, req:MemberReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     with con() as c:
@@ -210,7 +210,7 @@ def update_member(member_id:int, req:MemberReq, request:Request, authorization: 
     log_action(admin,'UPDATE_MEMBER',f'회원 수정 ID {member_id}: {req.name}',request)
     return {'ok':True, 'member': dict(saved) if saved else {'id': member_id}}
 
-@app.get('/api/members/{member_id}/detail')
+@router.get('/api/members/{member_id}/detail')
 def member_detail(member_id:int, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     with con() as c:
@@ -257,7 +257,7 @@ def member_detail(member_id:int, authorization: str|None = Header(default=None))
         }
     }
 
-@app.put('/api/members/{member_id}/memo')
+@router.put('/api/members/{member_id}/memo')
 def update_member_memo(member_id:int, req:MemberMemoReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     with con() as c:
@@ -267,7 +267,7 @@ def update_member_memo(member_id:int, req:MemberMemoReq, request:Request, author
     log_action(admin,'UPDATE_MEMBER_MEMO',f'회원 메모 수정: {m["name"]}',request)
     return {'ok':True,'id':member_id}
 
-@app.post('/api/members/{member_id}/notes')
+@router.post('/api/members/{member_id}/notes')
 def add_member_note(member_id:int, req:MemberNoteReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     note=(req.note or '').strip()
@@ -299,7 +299,7 @@ def rc312_resolve_member(c, member_id=None, member_name=''):
     return mid, name
 
 
-@app.get('/api/rc3-12/member-link-status')
+@router.get('/api/rc3-12/member-link-status')
 def rc312_member_link_status(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
@@ -311,7 +311,7 @@ def rc312_member_link_status(authorization: str|None = Header(default=None)):
     return {'ok': True, 'version': 'RC3-12', 'members': members, 'recommendations': recs, 'linked_recommendations': linked, 'orphan_recommendations': orphan, 'latest_orphans': [dict(r) for r in latest_orphans], 'message': '회원 선택 없이 생성된 기존 추천이력은 공통 추천으로 표시됩니다. 특정 회원으로 연결하려면 /api/rc3-12/link-orphan-recommendations 를 사용하세요.'}
 
 
-@app.post('/api/rc3-12/link-orphan-recommendations')
+@router.post('/api/rc3-12/link-orphan-recommendations')
 def rc312_link_orphan_recommendations(req: dict, request:Request, authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     member_id = int((req or {}).get('member_id') or 0)

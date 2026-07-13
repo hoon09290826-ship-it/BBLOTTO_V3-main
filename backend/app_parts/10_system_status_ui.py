@@ -1,15 +1,15 @@
 # Extracted from legacy backend/app.py lines 1493-2108.
-@app.get('/api/rc6-10/status')
+@router.get('/api/rc6-10/status')
 def rc6_10_status():
     return {'ok': True, 'version': 'RC6-10_SQL_PERCENT_STABLE', 'fix': 'postgres percent placeholder stable'}
 
-@app.get('/api/health')
+@router.get('/api/health')
 def health():
     return {'ok': True, 'app': APP_VERSION, 'phase': RC_VERSION, 'rc_version': RC_VERSION, 'time': now(), 'db_engine': DB_ENGINE, 'database_url_set': bool(DATABASE_URL), 'db_path': str(DB), 'persistent_dir': str(DB_DIR)}
 
 
 
-@app.get('/api/rc5-12/status')
+@router.get('/api/rc5-12/status')
 def rc5_12_status():
     """RC5-12: GitHub/Railway 배포 안정성 및 회원검색 상태 진단."""
     checks = []
@@ -41,7 +41,7 @@ def rc5_12_status():
     }
 
 
-@app.get('/api/rc5-13/status')
+@router.get('/api/rc5-13/status')
 def rc5_13_status():
     """RC5-13: GitHub/Railway 배포 전 최종 진단 및 핵심 테이블 상태 점검."""
     checks = []
@@ -107,7 +107,7 @@ def rc5_13_status():
     }
 
 
-@app.get('/api/rc5-14/status')
+@router.get('/api/rc5-14/status')
 def rc5_14_status():
     """RC5-14: GitHub/Railway 최종 업로드 전 파일/DB/환경 점검."""
     checks = []
@@ -185,7 +185,7 @@ def rc5_14_status():
     }
 
 
-@app.get('/api/rc5-15/status')
+@router.get('/api/rc5-15/status')
 def rc5_15_status():
     """RC5-15: 배포 직전 GitHub/Railway 실행 안정성 점검."""
     checks = []
@@ -296,7 +296,7 @@ def rc5_15_status():
     }
 
 
-@app.get('/api/rc5-16/status')
+@router.get('/api/rc5-16/status')
 def rc5_16_status():
     """RC5-16: GitHub 보안/정리 상태 점검."""
     checks = []
@@ -347,7 +347,7 @@ def rc5_16_status():
         'message': 'RC5-16 GitHub 보안/정리 점검입니다. ok가 true이면 업로드 안전 상태입니다.'
     }
 
-@app.get('/api/persistence_status')
+@router.get('/api/persistence_status')
 def persistence_status(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
@@ -456,7 +456,7 @@ def rc3_migrate_sqlite_to_current_db(source_path: Path | None = None):
     sc.close()
     return {'ok': len(errors) == 0, 'version': RC3_VERSION, 'source_path': str(source_path), 'migrated': migrated, 'skipped': skipped, 'errors': errors}
 
-@app.get('/api/rc3/database/status')
+@router.get('/api/rc3/database/status')
 def rc3_database_status():
     counts = {}
     warnings = []
@@ -483,7 +483,7 @@ def rc3_database_status():
         'message': 'Railway에서는 web 서비스 Variables에 DATABASE_URL=${{Postgres.DATABASE_URL}} 를 연결해야 PostgreSQL을 사용합니다.'
     }
 
-@app.post('/api/rc3/migrate/sqlite-to-postgres')
+@router.post('/api/rc3/migrate/sqlite-to-postgres')
 def rc3_migrate_sqlite_to_postgres(authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     result = rc3_migrate_sqlite_to_current_db()
@@ -494,7 +494,7 @@ def rc3_migrate_sqlite_to_postgres(authorization: str|None = Header(default=None
     return result
 
 
-@app.post('/api/rc3/member-db/ensure')
+@router.post('/api/rc3/member-db/ensure')
 def rc3_member_db_ensure(authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     init_db()
@@ -504,7 +504,7 @@ def rc3_member_db_ensure(authorization: str|None = Header(default=None)):
         pass
     return rc3_member_db_status(authorization)
 
-@app.get('/api/rc3/member-db/status')
+@router.get('/api/rc3/member-db/status')
 def rc3_member_db_status(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     tables = ['admins','sessions','login_logs','admin_logs','members','recommendations','sms_logs','winning_checks','settings']
@@ -539,7 +539,7 @@ def rc3_member_db_status(authorization: str|None = Header(default=None)):
         'message': 'RC3-3 회원관리 DB 상태입니다. ok가 false이면 /api/rc3/member-db/ensure 를 1회 실행하세요.'
     }
 
-@app.get('/api/rc3/member-db/login-logs')
+@router.get('/api/rc3/member-db/login-logs')
 def rc3_member_db_login_logs(limit:int=100, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     limit=max(1, min(int(limit or 100), 500))
@@ -547,11 +547,11 @@ def rc3_member_db_login_logs(limit:int=100, authorization: str|None = Header(def
         rows=c.execute('SELECT id,admin_id,username,success,ip,user_agent,message,created_at FROM login_logs ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
     return {'ok': True, 'items': [dict(r) for r in rows]}
 
-@app.get('/api/version')
+@router.get('/api/version')
 def version():
     return {'app': 'BBLOTTO PRO', 'version': 'V2 STABLE', 'phase': RC_VERSION, 'rc_version': RC_VERSION, 'features': ['server_foundation','members','recommendations','stats100','top3','score_grade','recommendation_history','admin_logs','db_health','cloud_deploy','backup_restore_guard','admin_audit','db_standardization','draw_auto_fetch_fallback','official_cache','ai_engine_v1_0','pair_triple_analysis','reason_based_scoring','member_linked_recommendations','member_linked_win_check','orphan_recommendation_repair','member_detail_message_history','member_detail_winning_history','member_detail_recommendation_hidden'], 'time': now()}
 
-@app.get('/api/rc3-8/health')
+@router.get('/api/rc3-8/health')
 def rc38_health(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     snap = rc38_db_health_snapshot()
@@ -562,7 +562,7 @@ def rc38_health(authorization: str|None = Header(default=None)):
     snap['message'] = 'RC3-8 상태 점검입니다. ok=true이면 핵심 테이블과 컬럼이 준비된 상태입니다.'
     return snap
 
-@app.get('/api/rc3-8/recommendation-summary')
+@router.get('/api/rc3-8/recommendation-summary')
 def rc38_recommendation_summary(limit:int=20, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     limit=max(1, min(int(limit or 20), 100))
@@ -574,7 +574,7 @@ def rc38_recommendation_summary(limit:int=20, authorization: str|None = Header(d
 
 
 
-@app.get('/api/rc6-7/status')
+@router.get('/api/rc6-7/status')
 def rc67_status(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     checks=[]
@@ -588,28 +588,28 @@ def rc67_status(authorization: str|None = Header(default=None)):
     return {'ok': all(x.get('ok') for x in checks), 'version':'RC6-10_SQL_PERCENT_STABLE', 'db_engine':DB_ENGINE, 'checks':checks, 'time':now()}
 
 
-@app.get('/')
+@router.get('/')
 def login_page(): return FileResponse(FRONT/'login.html')
 
-@app.get('/dashboard')
+@router.get('/dashboard')
 def dashboard_page(): return FileResponse(FRONT/'index.html')
 
 
-@app.get('/style.css')
+@router.get('/style.css')
 def style_css():
     return FileResponse(FRONT/'style.css', media_type='text/css', headers={'Cache-Control':'no-store, max-age=0'})
 
-@app.get('/app.js')
+@router.get('/app.js')
 def app_js():
     return FileResponse(FRONT/'app.js', media_type='application/javascript', headers={'Cache-Control':'no-store, max-age=0'})
 
 
 
-@app.get('/api/ui-health')
+@router.get('/api/ui-health')
 def ui_health():
     return {'ok': True, 'version': 'STABLE-CORE-1', 'event_owner': 'app.js', 'fallback_file': None, 'single_event_owner': True}
 
-@app.get('/login.js')
+@router.get('/login.js')
 def login_js():
     return FileResponse(FRONT/'login.js', media_type='application/javascript')
 

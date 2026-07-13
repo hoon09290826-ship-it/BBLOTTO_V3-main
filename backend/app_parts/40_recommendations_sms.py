@@ -1,5 +1,5 @@
 # Extracted from legacy backend/app.py lines 2873-3075.
-@app.post('/api/generate')
+@router.post('/api/generate')
 def generate(req:GenerateReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     member_name=''
@@ -47,7 +47,7 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     return {'id':None,'saved':False,'round_no':safe_round,'round':safe_round,'sets':combos,'combos':combos,'details':details,'top3':engine.get('top3',[]),'engine':engine,'analysis':analysis,'recommendation_analysis':recommendation_analysis,'sms':sms,'member_id':member_id,'member_name':member_name,'member_notice':sms,'quality_guide':engine.get('quality_guide')}
 
 
-@app.post('/api/recommendations/save')
+@router.post('/api/recommendations/save')
 def save_recommendation(req:SaveRecommendationReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     combos=[parse_nums(c) for c in (req.combos or [])]
@@ -89,14 +89,14 @@ def save_recommendation(req:SaveRecommendationReq, request:Request, authorizatio
     return {'ok':True,'saved':True,'id':rid,'member_id':member_id,'member_name':member_name,'round_no':data['round_no'],'count':len(combos)}
 
 
-@app.get('/api/recommendations')
+@router.get('/api/recommendations')
 def recommendations(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
         rows=c.execute('SELECT id,member_id,member_name,round_no,mode,count,analysis,sms,created_by,created_at FROM recommendations ORDER BY id DESC LIMIT 200').fetchall()
     return [dict(r) for r in rows]
 
-@app.get('/api/recommendations/{rec_id}')
+@router.get('/api/recommendations/{rec_id}')
 def recommendation_detail(rec_id:int, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
@@ -156,7 +156,7 @@ def send_sms_provider(phone, body):
             return {'status':'failed','provider':'http','message':str(e)}
     return {'status':'failed','provider':provider,'message':'지원하지 않는 문자 provider입니다. mock 또는 http를 사용하세요.'}
 
-@app.post('/api/sms')
+@router.post('/api/sms')
 def save_sms(req:SmsReq, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     name=req.member_name
@@ -178,17 +178,17 @@ def save_sms(req:SmsReq, request:Request, authorization: str|None = Header(defau
     log_action(admin,action,f'{req.round_no}회차 문자 {result.get("status")}',request)
     return {'id':sid, **result}
 
-@app.post('/api/sms_log')
+@router.post('/api/sms_log')
 def save_sms_log_alias(req:SmsReq, request:Request, authorization: str|None = Header(default=None)):
     return save_sms(req, request, authorization)
 
-@app.get('/api/sms')
+@router.get('/api/sms')
 def sms_logs(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c: rows=c.execute('SELECT * FROM sms_logs ORDER BY id DESC LIMIT 200').fetchall()
     return [dict(r) for r in rows]
 
-@app.delete('/api/sms/{sms_id}')
+@router.delete('/api/sms/{sms_id}')
 def delete_sms_log(sms_id:int, request:Request, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization)
     with con() as c:

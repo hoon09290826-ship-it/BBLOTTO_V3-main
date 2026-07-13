@@ -1,5 +1,5 @@
 # Extracted from legacy backend/app.py lines 5979-6941.
-@app.get('/api/rc3-11/engine-status')
+@router.get('/api/rc3-11/engine-status')
 def rc311_engine_status(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     st = latest_stats(300)
@@ -21,7 +21,7 @@ def rc311_engine_status(authorization: str|None = Header(default=None)):
 
 
 # === RC3-14: 회원 상세 화면 정리 ===
-@app.get('/api/rc3-14/status')
+@router.get('/api/rc3-14/status')
 def rc314_status(authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     return {
@@ -33,7 +33,7 @@ def rc314_status(authorization: str|None = Header(default=None)):
 
 
 # === RC3-15: 당첨번호 회차 무결성 점검/복구 ===
-@app.get('/api/rc3-15/draw-integrity')
+@router.get('/api/rc3-15/draw-integrity')
 def rc315_draw_integrity(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     expected, completed = _rc315_expected_round_and_completed()
@@ -50,7 +50,7 @@ def rc315_draw_integrity(authorization: str|None = Header(default=None)):
         'message': 'ok=false이면 /api/rc3-15/repair-draws 를 실행하면 추첨 전 회차 당첨번호가 정리됩니다.'
     }
 
-@app.post('/api/rc3-15/repair-draws')
+@router.post('/api/rc3-15/repair-draws')
 def rc315_repair_draws(request:Request, authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     with con() as c:

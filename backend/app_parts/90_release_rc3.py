@@ -1,5 +1,5 @@
 # Extracted from legacy backend/app.py lines 5412-5978.
-@app.get('/api/rc/version')
+@router.get('/api/rc/version')
 def sprint6_rc_version():
     return {
         'ok': True,
@@ -10,7 +10,7 @@ def sprint6_rc_version():
     }
 
 
-@app.get('/api/rc/db-safety')
+@router.get('/api/rc/db-safety')
 def sprint6_db_safety(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     tables = ['admins','members','draws','admin_logs','settings']
@@ -32,7 +32,7 @@ def sprint6_db_safety(authorization: str|None = Header(default=None)):
     }
 
 
-@app.post('/api/rc/safe-backup')
+@router.post('/api/rc/safe-backup')
 def sprint6_safe_backup(authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     if DB_ENGINE != 'sqlite':
@@ -48,7 +48,7 @@ def sprint6_safe_backup(authorization: str|None = Header(default=None)):
     return {'ok': True, 'version': SPRINT6_VERSION, 'backup_file': target.name, 'size_bytes': target.stat().st_size}
 
 
-@app.get('/api/rc/smoke-test')
+@router.get('/api/rc/smoke-test')
 def sprint6_smoke_test(authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     results = []
@@ -80,7 +80,7 @@ def sprint6_smoke_test(authorization: str|None = Header(default=None)):
     }
 
 
-@app.get('/api/rc/error-policy')
+@router.get('/api/rc/error-policy')
 def sprint6_error_policy():
     return {
         'ok': True,
@@ -138,7 +138,7 @@ def _rc39_database_candidates():
     return candidates
 
 
-@app.get('/api/rc3-9/status')
+@router.get('/api/rc3-9/status')
 def rc39_status(authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     counts = [_rc39_table_count(t) for t in RC3_9_REQUIRED_TABLES]
@@ -166,7 +166,7 @@ def rc39_status(authorization: str|None = Header(default=None)):
     }
 
 
-@app.post('/api/rc3-9/backup-create')
+@router.post('/api/rc3-9/backup-create')
 def rc39_backup_create(request: Request, authorization: str|None = Header(default=None)):
     admin = require_admin(authorization)
     result = create_db_backup('rc3_9_manual', admin)
@@ -174,7 +174,7 @@ def rc39_backup_create(request: Request, authorization: str|None = Header(defaul
     return {'ok': True, 'version': RC3_9_VERSION, 'backup': result}
 
 
-@app.get('/api/rc3-9/admin-audit')
+@router.get('/api/rc3-9/admin-audit')
 def rc39_admin_audit(limit: int = 100, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     limit = max(10, min(int(limit or 100), 300))
@@ -193,7 +193,7 @@ def rc39_admin_audit(limit: int = 100, authorization: str|None = Header(default=
     }
 
 
-@app.get('/api/rc3-9/recommendation-audit')
+@router.get('/api/rc3-9/recommendation-audit')
 def rc39_recommendation_audit(limit: int = 100, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     limit = max(10, min(int(limit or 100), 300))
@@ -213,7 +213,7 @@ def rc39_recommendation_audit(limit: int = 100, authorization: str|None = Header
     }
 
 
-@app.get('/api/rc3-9/db-standard')
+@router.get('/api/rc3-9/db-standard')
 def rc39_db_standard(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     return {
@@ -228,7 +228,7 @@ def rc39_db_standard(authorization: str|None = Header(default=None)):
 
 
 # === RC3-10: 당첨번호 자동조회 안정화 ===
-@app.get('/api/rc3-10/status')
+@router.get('/api/rc3-10/status')
 def rc310_status(round_no:int|None=None, authorization: str|None = Header(default=None)):
     require_admin(authorization)
     r = int(round_no or expected_lotto_round())
@@ -248,7 +248,7 @@ def rc310_status(round_no:int|None=None, authorization: str|None = Header(defaul
 
 
 # === RC3-12: 회원 연동 당첨확인 안정화 ===
-@app.get('/api/rc3-12/status')
+@router.get('/api/rc3-12/status')
 def rc312_status(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     with con() as c:
