@@ -1,3 +1,28 @@
+/* BBLOTTO V3 STABLE CORE - single event owner: app.js */
+(function(){
+  'use strict';
+  function prepareUi(){
+    document.querySelectorAll('button').forEach(function(button){
+      if(!button.hasAttribute('type')) button.type='button';
+    });
+    var modal=document.getElementById('adminCreateModal');
+    if(modal && !modal.classList.contains('is-open')){
+      modal.style.display='none';
+      modal.setAttribute('aria-hidden','true');
+    }
+    document.documentElement.dataset.bblottoUi='stable-core-1';
+  }
+  window.addEventListener('error',function(event){
+    console.error('[BBLOTTO STABLE CORE]',event.error||event.message);
+  });
+  window.addEventListener('unhandledrejection',function(event){
+    console.error('[BBLOTTO STABLE CORE PROMISE]',event.reason);
+  });
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',prepareUi,{once:true});
+  else prepareUi();
+  window.BBLOTTO_STABLE_CORE='1.0.0';
+})();
+
 /* BBLOTTO PRO V40 PHASE2 FRONTEND CORE
    목표: 버튼 안정화, 추천결과 상세표시, 회원 안내문구 자동 생성, 분석 표시 강화 */
 const $ = (id) => document.getElementById(id);

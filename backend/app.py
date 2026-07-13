@@ -26,7 +26,7 @@ EXPORT_DIR = Path(os.getenv('BBLOTTO_EXPORT_DIR', str(DB_DIR / 'exports'))); EXP
 DB = DB_DIR / 'bblotto_v34.db'
 FRONT = BASE / 'frontend'
 
-RC_VERSION = 'STABLE7_WIN_CHECK_PAGINATION'
+RC_VERSION = 'STABLE_CORE_CLEAN_BUILD'
 APP_VERSION = 'BBLOTTO V3 STABLE'
 app = FastAPI(title=f'{APP_VERSION} {RC_VERSION}', docs_url=None, redoc_url=None, openapi_url=None)
 RC3_8_VERSION = 'V2_STABLE_RC3_15'
@@ -94,7 +94,7 @@ async def rc11_security_headers(request: Request, call_next):
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
         "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     )
-    if request.url.path.startswith('/api/') or request.url.path in {'/','/dashboard','/app.js','/login.js','/style.css','/service-worker.js'}:
+    if request.url.path.startswith('/api/') or request.url.path in {'/','/dashboard','/app.js','/login.js','/style.css'}:
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
@@ -2094,29 +2094,17 @@ def style_css():
 def app_js():
     return FileResponse(FRONT/'app.js', media_type='application/javascript', headers={'Cache-Control':'no-store, max-age=0'})
 
-@app.get('/ui-stable.js')
-def ui_stable_js():
-    return FileResponse(FRONT/'ui-stable.js', media_type='application/javascript', headers={'Cache-Control':'no-store, max-age=0'})
 
-@app.get('/critical-buttons.js')
-def critical_buttons_js():
-    return FileResponse(FRONT/'critical-buttons.js', media_type='application/javascript', headers={'Cache-Control':'no-store, max-age=0'})
 
 @app.get('/api/ui-health')
 def ui_health():
-    return {'ok': True, 'version': 'STABLE-7', 'event_owner': 'app.js', 'fallback_file': 'critical-buttons.js', 'fallback_only_when_bindings_missing': True}
+    return {'ok': True, 'version': 'STABLE-CORE-1', 'event_owner': 'app.js', 'fallback_file': None, 'single_event_owner': True}
 
 @app.get('/login.js')
 def login_js():
     return FileResponse(FRONT/'login.js', media_type='application/javascript')
 
-@app.get('/manifest.json')
-def manifest_json():
-    return FileResponse(FRONT/'manifest.json', media_type='application/manifest+json')
 
-@app.get('/service-worker.js')
-def service_worker_js():
-    return FileResponse(FRONT/'service-worker.js', media_type='application/javascript')
 
 @app.post('/api/login')
 def login(req:LoginReq, request:Request):
@@ -5178,7 +5166,7 @@ def sprint3_mobile_status(authorization: str|None = Header(default=None)):
     return {
         'version': SPRINT3_VERSION, 'ok': True, 'members': members, 'recommendations': recs,
         'latest_draw': _s3_row_to_draw(latest),
-        'pwa': {'manifest': True, 'service_worker': True, 'mobile_layout': True},
+        'pwa': {'manifest': False, 'service_worker': False, 'mobile_layout': True},
         'summary': '모바일 접속용 핵심 상태 점검이 정상입니다.'
     }
 
