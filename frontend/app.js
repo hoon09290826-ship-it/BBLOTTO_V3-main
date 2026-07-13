@@ -697,7 +697,7 @@ function renderPagination(containerId, total, page, pageSize, onPageFn, onSizeFn
   for(let i=from;i<=to;i++) pages.push(`<button type="button" class="page-btn ${i===page?'active':''}" data-action="page-call" data-page-fn="${onPageFn}" data-page="${i}">${i}</button>`);
   box.innerHTML = `<div class="pager-info">총 ${Number(total||0).toLocaleString()}건 · ${start}-${end} 표시</div>
     <div class="pager-actions">
-      <select onchange="${onSizeFn}(this.value)"><option ${pageSize==10?'selected':''}>10</option><option ${pageSize==20?'selected':''}>20</option><option ${pageSize==30?'selected':''}>30</option><option ${pageSize==50?'selected':''}>50</option><option ${pageSize==100?'selected':''}>100</option></select>
+      <select data-action="page-size-call" data-size-fn="${onSizeFn}"><option ${pageSize==10?'selected':''}>10</option><option ${pageSize==20?'selected':''}>20</option><option ${pageSize==30?'selected':''}>30</option><option ${pageSize==50?'selected':''}>50</option><option ${pageSize==100?'selected':''}>100</option></select>
       <button type="button" data-action="page-call" data-page-fn="${onPageFn}" data-page="1" ${page<=1?'disabled':''}>처음</button>
       <button type="button" data-action="page-call" data-page-fn="${onPageFn}" data-page="${page-1}" ${page<=1?'disabled':''}>이전</button>
       ${pages.join('')}
@@ -2458,7 +2458,7 @@ function bind(){
       const n=(k)=>Number(btn.dataset[k]||0);
       if(a==='download-api') return downloadApi(btn.dataset.url||'');
       if(a==='page-call'){
-        const allowed=['setMemberPage','setWinningPage','setSmsLogPage','setRecommendationPage'];
+        const allowed=['setMemberPage','setWinningPage','setSmsLogPage','setRecommendationPage','setStatsPage'];
         const fn=btn.dataset.pageFn;
         if(allowed.includes(fn) && typeof window[fn]==='function') return window[fn](n('page'));
         return;
@@ -2482,6 +2482,16 @@ function bind(){
       if(a==='member-memo-save') return saveMemberMemo(n('memberId'));
       if(a==='member-note-save') return saveMemberNote(n('memberId'));
       if(a==='manual-sms-save') return saveManualSmsLog(n('memberId'));
+    }));
+  }
+  if(!window.__bbPageSizeRouterBound){
+    window.__bbPageSizeRouterBound=true;
+    document.addEventListener('change', safe(function(e){
+      const select=e.target?.closest?.('select[data-action="page-size-call"]');
+      if(!select) return;
+      const allowed=['setMemberPageSize','setWinningPageSize','setSmsLogPageSize','setRecommendationPageSize','setStatsPageSize'];
+      const fn=select.dataset.sizeFn;
+      if(allowed.includes(fn) && typeof window[fn]==='function') return window[fn](select.value);
     }));
   }
   // STABLE-5: 핵심 버튼 바인딩 완료 신호. 별도 안전망은 이 신호가 없을 때만 작동합니다.
