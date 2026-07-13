@@ -26,7 +26,7 @@ EXPORT_DIR = Path(os.getenv('BBLOTTO_EXPORT_DIR', str(DB_DIR / 'exports'))); EXP
 DB = DB_DIR / 'bblotto_v34.db'
 FRONT = BASE / 'frontend'
 
-RC_VERSION = 'STABLE6_PAGINATION_FIX'
+RC_VERSION = 'STABLE7_WIN_CHECK_PAGINATION'
 APP_VERSION = 'BBLOTTO V3 STABLE'
 app = FastAPI(title=f'{APP_VERSION} {RC_VERSION}', docs_url=None, redoc_url=None, openapi_url=None)
 RC3_8_VERSION = 'V2_STABLE_RC3_15'
@@ -2104,7 +2104,7 @@ def critical_buttons_js():
 
 @app.get('/api/ui-health')
 def ui_health():
-    return {'ok': True, 'version': 'STABLE-6', 'event_owner': 'app.js', 'fallback_file': 'critical-buttons.js', 'fallback_only_when_bindings_missing': True}
+    return {'ok': True, 'version': 'STABLE-7', 'event_owner': 'app.js', 'fallback_file': 'critical-buttons.js', 'fallback_only_when_bindings_missing': True}
 
 @app.get('/login.js')
 def login_js():

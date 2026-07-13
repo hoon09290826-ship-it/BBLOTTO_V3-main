@@ -2458,7 +2458,7 @@ function bind(){
       const n=(k)=>Number(btn.dataset[k]||0);
       if(a==='download-api') return downloadApi(btn.dataset.url||'');
       if(a==='page-call'){
-        const allowed=['setMemberPage','setWinningPage','setSmsLogPage','setRecommendationPage','setStatsPage'];
+        const allowed=['setMemberPage','setStatsPage','setDrawPage','setWinCheckPage','setWinningPage','setSmsLogPage','setRecommendationPage'];
         const fn=btn.dataset.pageFn;
         if(allowed.includes(fn) && typeof window[fn]==='function') return window[fn](n('page'));
         return;
@@ -2489,7 +2489,7 @@ function bind(){
     document.addEventListener('change', safe(function(e){
       const select=e.target?.closest?.('select[data-action="page-size-call"]');
       if(!select) return;
-      const allowed=['setMemberPageSize','setWinningPageSize','setSmsLogPageSize','setRecommendationPageSize','setStatsPageSize'];
+      const allowed=['setMemberPageSize','setStatsPageSize','setDrawPageSize','setWinCheckPageSize','setWinningPageSize','setSmsLogPageSize','setRecommendationPageSize'];
       const fn=select.dataset.sizeFn;
       if(allowed.includes(fn) && typeof window[fn]==='function') return window[fn](select.value);
     }));
