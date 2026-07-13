@@ -1247,3 +1247,135 @@ def rc9_audit() -> Dict[str, Any]:
         "cache_storage": cache.get("cache_storage"),
         "disclaimer": cache.get("disclaimer"),
     }
+
+# ===================== STABLE-11 DYNAMIC PORTFOLIO & EXPLAINABLE ENGINE =====================
+# 기존 통계/캐시/후보 생성은 그대로 사용하고 최종 조합의 다양성과 설명 데이터를 강화한다.
+_STABLE11_BASE_MAKE_PREMIUM_COMBOS = make_premium_combos
+STABLE11_ENGINE_VERSION = "BBLOTTO_STABLE_11_DYNAMIC_EXPLAINABLE"
+
+
+def _stable11_archetype(nums: Sequence[int], detail: Dict[str, Any], cache: Dict[str, Any]) -> str:
+    sig = _signature(nums)
+    hot = set((cache.get("hot") or [])[:14])
+    overdue = set((cache.get("overdue") or [])[:14])
+    hot_count = len(set(nums) & hot)
+    overdue_count = len(set(nums) & overdue)
+    if hot_count >= 3 and overdue_count >= 2:
+        return "흐름혼합형"
+    if overdue_count >= 3:
+        return "반등분산형"
+    if hot_count >= 3:
+        return "상승흐름형"
+    if sig["odd"] == 3 and max(sig["zones"]) <= 2 and 6 <= sig["ac"] <= 10:
+        return "정밀균형형"
+    if sig["sum"] <= 125:
+        return "저중심확장형"
+    if sig["sum"] >= 165:
+        return "중고분산형"
+    if sig["cons"] == 1:
+        return "연속수혼합형"
+    return "구간분산형"
+
+
+def _stable11_number_evidence(n: int, cache: Dict[str, Any]) -> str:
+    freq10 = int((cache.get("frequency10") or {}).get(str(n), 0))
+    freq30 = int((cache.get("frequency30") or {}).get(str(n), 0))
+    freq100 = int((cache.get("frequency100") or {}).get(str(n), 0))
+    gap = int((cache.get("gap") or {}).get(str(n), 0))
+    hot_rank = {v: i + 1 for i, v in enumerate(cache.get("hot") or [])}
+    overdue_rank = {v: i + 1 for i, v in enumerate(cache.get("overdue") or [])}
+    if n in hot_rank and hot_rank[n] <= 12:
+        return f"최근 10·30·100회 통합 신호 상위권(최근30회 {freq30}회)"
+    if n in overdue_rank and overdue_rank[n] <= 12:
+        return f"최근 {gap}회 공백을 반영한 반등 후보"
+    if freq10 >= 2:
+        return f"최근 10회 {freq10}회 출현한 단기 흐름 후보"
+    if freq100 >= 14:
+        return f"최근 100회 {freq100}회 출현한 장기 안정 후보"
+    return f"단기 빈도와 미출현 간격을 함께 고려한 보완 후보"
+
+
+def _stable11_portfolio_value(combo: Sequence[int], detail: Dict[str, Any], selected: List[List[int]], usage: Counter, archetype_usage: Counter, cache: Dict[str, Any]) -> float:
+    value = float(detail.get("score") or detail.get("ai_score") or 0)
+    combo_set = set(combo)
+    for prev in selected:
+        overlap = len(combo_set & set(prev))
+        value -= {0: 0, 1: 0.1, 2: 0.8, 3: 4.2, 4: 15.0, 5: 40.0, 6: 100.0}.get(overlap, 100.0)
+    value -= sum(usage[n] * 0.72 + max(0, usage[n] - 1) * 1.35 for n in combo)
+    archetype = _stable11_archetype(combo, detail, cache)
+    value -= archetype_usage[archetype] * 2.4
+    sig = _signature(combo)
+    if sig["odd"] == 3: value += 0.7
+    if max(sig["zones"]) <= 2: value += 0.9
+    if len({n % 10 for n in combo}) >= 5: value += 0.6
+    if 115 <= sig["sum"] <= 170: value += 0.5
+    return value
+
+
+def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None):
+    target = max(1, min(50, int(count or 10)))
+    # 최종 요청 수보다 넓은 후보군을 만든 뒤 포트폴리오 단위로 다시 선별한다.
+    candidate_count = min(50, max(target, 32 if target <= 10 else target * 2))
+    combos, details, st = _STABLE11_BASE_MAKE_PREMIUM_COMBOS(candidate_count, fixed, excluded, mode, member_grade, member_id=member_id)
+    cache = get_analysis_cache(False)
+    detail_map = {tuple(sorted(d.get("numbers") or [])): dict(d) for d in (details or [])}
+    pool: List[Tuple[List[int], Dict[str, Any]]] = []
+    seen = set()
+    for combo in combos or []:
+        key = tuple(sorted(int(n) for n in combo))
+        if len(key) == 6 and key not in seen:
+            seen.add(key)
+            pool.append((list(key), detail_map.get(key, {"numbers": list(key), "score": 0})))
+
+    selected: List[List[int]] = []
+    selected_details: List[Dict[str, Any]] = []
+    usage: Counter = Counter()
+    archetype_usage: Counter = Counter()
+    while pool and len(selected) < target:
+        ranked = sorted(
+            ((_stable11_portfolio_value(c, d, selected, usage, archetype_usage, cache), c, d) for c, d in pool),
+            key=lambda x: (-x[0], x[1]),
+        )
+        _, combo, detail = ranked[0]
+        pool = [(c, d) for c, d in pool if c != combo]
+        selected.append(combo)
+        usage.update(combo)
+        archetype = _stable11_archetype(combo, detail, cache)
+        archetype_usage[archetype] += 1
+        sig = _signature(combo)
+        evidence = [{"number": n, "reason": _stable11_number_evidence(n, cache)} for n in combo]
+        hot = set((cache.get("hot") or [])[:14])
+        overdue = set((cache.get("overdue") or [])[:14])
+        reason_lines = [
+            f"{archetype}: 저·중·고 구간 {sig['zones'][0]}-{sig['zones'][1]}-{sig['zones'][2]}, 홀짝 {sig['odd']}:{6-sig['odd']}",
+            f"합계 {sig['sum']} · AC {sig['ac']} · 끝수 {len({n % 10 for n in combo})}종으로 구조 균형 확보",
+            f"최근 흐름 후보 {len(set(combo)&hot)}개와 미출현 보완 후보 {len(set(combo)&overdue)}개를 혼합",
+        ]
+        detail.update({
+            "numbers": combo,
+            "engine_version": STABLE11_ENGINE_VERSION,
+            "engine": STABLE11_ENGINE_VERSION,
+            "type": archetype,
+            "strategy": archetype,
+            "portfolio_type": archetype,
+            "number_evidence": evidence,
+            "reasons": reason_lines,
+            "reason": " / ".join(reason_lines),
+            "sum": sig["sum"], "odd": sig["odd"], "even": 6-sig["odd"], "ac": sig["ac"], "zones": sig["zones"],
+        })
+        selected_details.append(detail)
+
+    st.update({
+        "engine_version": STABLE11_ENGINE_VERSION,
+        "stable11": True,
+        "stable11_candidate_count": len(combos or []),
+        "stable11_unique_numbers": len(usage),
+        "stable11_max_number_use": max(usage.values(), default=0),
+        "stable11_archetypes": dict(archetype_usage),
+        "methodology": [
+            "최근 10·30·100회와 전체 누적 출현 신호", "미출현 간격", "동반출현", "홀짝·구간·합계·AC·끝수",
+            "조합 간 번호 중복과 전략 유형 분산", "번호별 선택 근거 자동 생성",
+        ],
+    })
+    return selected[:target], selected_details[:target], st
+# ===================== /STABLE-11 DYNAMIC PORTFOLIO & EXPLAINABLE ENGINE =====================

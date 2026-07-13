@@ -1,10 +1,7 @@
-"""BBLOTTO STABLE 설명형 분석 엔진.
-
-생성된 추천번호와 최근/누적 통계의 실제 특징만 읽어 회원이 이해하기 쉬운
-4줄 설명을 만든다. 임의 신뢰도나 당첨 보장 표현은 사용하지 않는다.
+"""BBLOTTO STABLE-11 동적 설명 엔진.
+실제 생성 조합과 통계값을 읽어 매 생성 결과에 맞는 핵심 분석을 작성한다.
 """
 from __future__ import annotations
-
 import collections
 import hashlib
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
@@ -12,24 +9,18 @@ from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 def _numbers(item: Dict[str, Any]) -> List[int]:
     raw = item.get("numbers") or item.get("nums") or item.get("combo") or []
-    try:
-        nums = sorted({int(n) for n in raw if 1 <= int(n) <= 45})
-    except Exception:
-        return []
+    try: nums = sorted({int(n) for n in raw if 1 <= int(n) <= 45})
+    except Exception: return []
     return nums if len(nums) == 6 else []
 
 
 def _as_int_list(values: Iterable[Any], limit: int = 20) -> List[int]:
-    out: List[int] = []
+    out=[]
     for value in values or []:
-        try:
-            n = int(value)
-        except Exception:
-            continue
-        if 1 <= n <= 45 and n not in out:
-            out.append(n)
-        if len(out) >= limit:
-            break
+        try: n=int(value)
+        except Exception: continue
+        if 1 <= n <= 45 and n not in out: out.append(n)
+        if len(out)>=limit: break
     return out
 
 
@@ -37,92 +28,61 @@ def _fmt(nums: Sequence[int], limit: int = 4) -> str:
     return ", ".join(str(n) for n in list(nums)[:limit])
 
 
-def _pick_by_combo(combos: List[List[int]], choices: Sequence[str], salt: str) -> str:
-    if not choices:
-        return ""
-    key = f"{salt}|{combos}".encode("utf-8")
-    idx = int.from_bytes(hashlib.sha256(key).digest()[:4], "big") % len(choices)
+def _pick(seed: str, choices: Sequence[str]) -> str:
+    if not choices: return ""
+    idx=int.from_bytes(hashlib.sha256(seed.encode("utf-8")).digest()[:4],"big")%len(choices)
     return choices[idx]
 
 
 def _features(combos: List[List[int]]) -> Dict[str, Any]:
-    flat = [n for c in combos for n in c]
-    freq = collections.Counter(flat)
-    odd_counts = [sum(n % 2 for n in c) for c in combos]
-    sums = [sum(c) for c in combos]
-    zone_totals = [sum(n <= 15 for n in flat), sum(16 <= n <= 30 for n in flat), sum(n >= 31 for n in flat)]
-    consecutive = sum(any(b-a == 1 for a,b in zip(c,c[1:])) for c in combos)
-    end_balanced = sum(len({n % 10 for n in c}) >= 5 for c in combos)
-    overlaps = [len(set(a)&set(b)) for i,a in enumerate(combos) for b in combos[i+1:]]
-    common = [n for n,c in freq.most_common() if c >= 2]
-    return {
-        "flat": flat, "freq": freq, "common": common,
-        "unique": len(freq), "odd_balanced": sum(2 <= x <= 4 for x in odd_counts),
-        "sum_min": min(sums), "sum_max": max(sums), "sum_avg": round(sum(sums)/len(sums)),
-        "zones": zone_totals, "consecutive": consecutive, "end_balanced": end_balanced,
-        "max_overlap": max(overlaps, default=0),
-    }
+    flat=[n for c in combos for n in c]; freq=collections.Counter(flat)
+    sums=[sum(c) for c in combos]; odds=[sum(n%2 for n in c) for c in combos]
+    zones=[sum(n<=15 for n in flat),sum(16<=n<=30 for n in flat),sum(n>=31 for n in flat)]
+    overlaps=[len(set(a)&set(b)) for i,a in enumerate(combos) for b in combos[i+1:]]
+    consecutive=sum(any(b-a==1 for a,b in zip(c,c[1:])) for c in combos)
+    end_spread=sum(len({n%10 for n in c})>=5 for c in combos)
+    return {"flat":flat,"freq":freq,"sums":sums,"odds":odds,"zones":zones,"unique":len(freq),
+            "max_overlap":max(overlaps,default=0),"consecutive":consecutive,"end_spread":end_spread}
 
 
 def _trend_lists(stats: Dict[str, Any]) -> Tuple[List[int], List[int]]:
-    hot = _as_int_list(stats.get("hot20") or stats.get("hot30") or stats.get("hot100") or stats.get("hot300") or stats.get("hot") or [])
-    overdue = _as_int_list(stats.get("overdue20") or stats.get("overdue30") or stats.get("overdue100") or stats.get("overdue300") or stats.get("overdue") or [])
-    return hot, overdue
+    hot=_as_int_list(stats.get("hot") or stats.get("hot20") or stats.get("hot30") or stats.get("hot100") or [])
+    overdue=_as_int_list(stats.get("overdue") or stats.get("overdue20") or stats.get("overdue30") or stats.get("overdue100") or [])
+    return hot,overdue
 
 
-def build_member_friendly_analysis(round_no: int, stats: Dict[str, Any], mode: str, fixed: Any, excluded: Any, details: List[Dict[str, Any]]) -> str:
-    combos = [_numbers(item) for item in details or []]
-    combos = [c for c in combos if c]
-    latest = int(stats.get("latest_round") or stats.get("target_round") or max(0, int(round_no or 1)-1))
+def build_member_friendly_analysis(round_no:int, stats:Dict[str,Any], mode:str, fixed:Any, excluded:Any, details:List[Dict[str,Any]])->str:
+    combos=[_numbers(x) for x in details or []]; combos=[x for x in combos if x]
+    latest=int(stats.get("latest_round") or max(0,int(round_no or 1)-1))
     if not combos:
         return "\n".join([
-            f"1회차부터 {latest}회차까지의 누적 기록과 최근 흐름을 함께 비교해 이번 후보를 구성했습니다.",
-            "저·중·고번호와 홀짝 비율이 한쪽으로 몰리지 않도록 기본 균형을 적용했습니다.",
-            "비슷한 조합의 반복을 줄이고 조합마다 서로 다른 번호 흐름을 담았습니다.",
+            f"1회차부터 {latest}회차까지의 누적 기록과 최근 10·30·100회 흐름을 함께 비교했습니다.",
+            "홀짝·구간·합계·AC·끝수 분포를 동시에 점검해 한쪽으로 치우친 후보를 줄였습니다.",
+            "조합 간 번호 반복을 낮추고 서로 다른 흐름을 나누어 담는 방식으로 구성했습니다.",
         ])
-
-    f = _features(combos)
-    hot, overdue = _trend_lists(stats)
-    hot_used = [n for n in hot if n in f["freq"]][:4]
-    overdue_used = [n for n in overdue if n in f["freq"] and n not in hot_used][:4]
-    core = f["common"][:4]
-    total = len(f["flat"])
-    zone_pct = [round(v/total*100) for v in f["zones"]]
-
-    opening = _pick_by_combo(combos, [
-        f"1회차부터 {latest}회차까지의 누적 기록과 최근 흐름을 함께 비교해 {round_no}회차 추천번호를 구성했습니다.",
-        f"{latest}회차까지의 장기 통계와 최근 출현 변화를 함께 살펴 이번 추천 후보를 선별했습니다.",
-        f"전체 당첨 기록과 최근 회차의 움직임을 함께 반영해 {round_no}회차 조합을 정리했습니다.",
-    ], "opening")
-
+    f=_features(combos); hot,overdue=_trend_lists(stats)
+    hot_used=[n for n in hot if n in f["freq"]][:5]; overdue_used=[n for n in overdue if n in f["freq"] and n not in hot_used][:5]
+    core=[n for n,c in f["freq"].most_common() if c>=2][:4]
+    types=[str(d.get("portfolio_type") or d.get("strategy") or d.get("type") or "") for d in details]
+    types=[x for x in types if x]; type_counts=collections.Counter(types)
+    seed=f"{round_no}|{combos}|{types}"
+    opening=_pick(seed+"o",[
+        f"{latest}회차까지의 전체 기록과 최근 10·30·100회 변화를 교차 비교해 {round_no}회차 후보를 선별했습니다.",
+        f"1회차부터 {latest}회차까지의 장기 빈도에 최근 흐름과 미출현 간격을 더해 {round_no}회차 조합을 구성했습니다.",
+        f"누적 출현 기록, 최근 상승 신호, 번호별 공백을 함께 평가해 {round_no}회차 추천 후보를 정리했습니다.",
+    ])
     if hot_used and overdue_used:
-        trend = f"최근 흐름에서 확인된 {_fmt(hot_used)}번과 쉬어간 기간을 고려한 {_fmt(overdue_used)}번을 여러 조합에 나누어 반영했습니다."
+        trend=f"최근 흐름 후보 {_fmt(hot_used)}번과 공백 후 반등 후보 {_fmt(overdue_used)}번을 조합별로 나누어, 강세수에만 몰리지 않도록 혼합했습니다."
     elif hot_used:
-        trend = f"최근 출현 흐름이 이어진 {_fmt(hot_used)}번을 중심 후보로 두되 한 조합에 몰리지 않도록 분산했습니다."
+        trend=f"최근 흐름에서 확인된 {_fmt(hot_used)}번을 중심축으로 사용하되, 주변 번호는 조합마다 다르게 배치해 반복을 줄였습니다."
     elif overdue_used:
-        trend = f"쉬어간 기간이 길었던 {_fmt(overdue_used)}번을 보강 후보로 포함하고 다른 번호와 균형 있게 배치했습니다."
-    elif core:
-        trend = f"전체 조합에서 반복된 중심 번호 {_fmt(core)}번은 유지하고 주변 번호는 조합마다 다르게 구성했습니다."
+        trend=f"미출현 간격이 길어진 {_fmt(overdue_used)}번을 보완 후보로 반영하고 장기 안정 번호와 함께 배치했습니다."
     else:
-        trend = "특정 번호를 반복하기보다 여러 후보를 고르게 사용해 한쪽 흐름에 치우치지 않도록 구성했습니다."
-
-    balance = (
-        f"저·중·고번호 비중은 약 {zone_pct[0]}%·{zone_pct[1]}%·{zone_pct[2]}%로 나누고, "
-        f"{len(combos)}개 중 {f['odd_balanced']}개 조합의 홀짝을 2:4~4:2 범위로 맞췄습니다."
-    )
-
-    structure_bits = []
-    if f["consecutive"]:
-        structure_bits.append(f"연속수는 {f['consecutive']}개 조합에만 제한")
-    else:
-        structure_bits.append("연속수 반복은 최소화")
-    structure_bits.append(f"끝수 분산은 {f['end_balanced']}개 조합에서 확보")
-    structure_bits.append(f"조합 간 최대 중복은 {f['max_overlap']}개로 관리")
-    structure = ", ".join(structure_bits) + f"했으며 전체적으로 {f['unique']}개의 서로 다른 번호를 사용했습니다."
-
-    lines = [opening, trend, balance, structure]
-    if fixed:
-        lines[-1] += " 지정한 고정수는 유지했습니다."
-    if excluded:
-        lines[-1] += " 제외수는 모든 조합에서 배제했습니다."
-    return "\n".join(lines)
+        trend=f"반복 중심수 {_fmt(core)}번은 필요한 범위에서만 유지하고 나머지 번호를 넓게 분산했습니다." if core else "특정 번호군에 의존하지 않고 후보 범위를 넓게 분산했습니다."
+    total=len(f["flat"]); zp=[round(v/total*100) for v in f["zones"]]
+    balance=f"저·중·고번호 비중은 {zp[0]}%·{zp[1]}%·{zp[2]}%이며, 합계는 {min(f['sums'])}~{max(f['sums'])}, 홀짝 균형 조합은 {sum(2<=x<=4 for x in f['odds'])}/{len(combos)}개입니다."
+    type_text=", ".join(f"{k} {v}개" for k,v in type_counts.most_common(3)) if type_counts else "균형형과 분산형"
+    structure=f"{type_text}로 성격을 나누고, 전체 {f['unique']}개 번호를 사용했습니다. 조합 간 최대 중복은 {f['max_overlap']}개, 끝수 분산 확보 조합은 {f['end_spread']}개입니다."
+    if fixed: structure += " 지정한 고정수는 모든 조합에 유지했습니다."
+    if excluded: structure += " 제외수는 생성 후보에서 완전히 배제했습니다."
+    return "\n".join([opening,trend,balance,structure])
