@@ -51,7 +51,7 @@ def _stable41_marginal_value(combo, detail, selected, usage, pair_usage, pattern
 
 def make_premium_combos(count=10, fixed='', excluded='', mode='balanced', member_grade='일반', member_id=None):
     target = max(1, min(50, int(count or 10)))
-    sample_count = min(50, max(target, 30 if target <= 10 else target * 3))
+    sample_count = min(50, max(target, 18 if target <= 10 else target + min(10, target)))
     combos, details, st = _BBLOTTO_V40_MAKE_PREMIUM_COMBOS(
         sample_count, fixed, excluded, mode, member_grade, member_id=member_id
     )

@@ -20,6 +20,7 @@ import sqlite3
 import time
 import os
 import datetime
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
 from pathlib import Path
@@ -403,10 +404,33 @@ def _auto_sync_latest_if_needed(draws: Sequence[Dict[str, Any]], target_round: O
             break
     return _load_draws()
 
+_BACKGROUND_SYNC_RUNNING = False
+
+def _start_background_latest_sync(draws: Sequence[Dict[str, Any]], target_round: Optional[int] = None) -> None:
+    """Check missing latest draws without blocking recommendation generation."""
+    global _BACKGROUND_SYNC_RUNNING
+    latest = max((int(d.get("r") or 0) for d in draws), default=0)
+    target = _resolve_target_round(target_round, latest)
+    if latest >= target or _BACKGROUND_SYNC_RUNNING:
+        return
+    _BACKGROUND_SYNC_RUNNING = True
+    def _worker():
+        global _BACKGROUND_SYNC_RUNNING
+        try:
+            _auto_sync_latest_if_needed(draws, target_round)
+        except Exception as exc:
+            print(f"[BBLOTTO] background latest draw sync failed: {exc!r}")
+        finally:
+            _BACKGROUND_SYNC_RUNNING = False
+    threading.Thread(target=_worker, name="bblotto-draw-sync", daemon=True).start()
+
+
 def get_analysis_cache(force: bool = False, target_round: Optional[int] = None) -> Dict[str, Any]:
     draws = _load_draws()
-    # 추천번호 생성과 통계 조회 모두 이 함수를 통과하므로 새 회차를 자동 반영합니다.
-    draws = _auto_sync_latest_if_needed(draws, target_round)
+    # STAGE8: external draw synchronization used to block the generate button for
+    # several network timeouts. Run it in a daemon thread and use the current DB
+    # snapshot immediately; the next request sees newly synchronized data.
+    _start_background_latest_sync(draws, target_round)
     if force:
         return _build_cache(target_round)
     cache = _read_cache_from_db()
@@ -598,9 +622,9 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
     for n in excluded_nums:
         weights.pop(n, None)
 
-    target_candidates = {"일반": 2200, "2등": 3000, "1등": 4000}.get(grade, 2200)
+    target_candidates = {"일반": 900, "2등": 1200, "1등": 1600}.get(grade, 900)
     # FAST 패치: 요청 조합 수에 비례하되 과도한 후보 반복은 제한한다.
-    target_candidates = max(target_candidates, count * 180)
+    target_candidates = max(target_candidates, count * 70)
     candidates: List[Tuple[float, List[int], List[str], Dict[str, Any]]] = []
     seen: set[Tuple[int, ...]] = set()
     attempts = 0

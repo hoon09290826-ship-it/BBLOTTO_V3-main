@@ -866,7 +866,8 @@ def ensure_daily_backup():
     except Exception:
         _log_suppressed_exception("00_core.py:828")
 
-init_db()
+from backend.migration_runner import run_versioned_migrations
+run_versioned_migrations(con, init_db, logger, version=8)
 ensure_daily_backup()
 
 from .repositories.session_repository import (

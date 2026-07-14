@@ -282,12 +282,15 @@ BBLOTTO_AI_V4_ENGINE_VERSION = 'BBLOTTO_AI_V4_ENGINE_FULL_REPLACEMENT_RC8_1'
 
 
 def _v4_grade_params(grade='일반'):
+    # STAGE8 performance: previous settings attempted up to 120k~240k loops per click,
+    # which could make Render workers appear frozen. Quality tiers remain distinct,
+    # but candidate work is bounded and later scaled to the requested combination count.
     g = rc45_grade_label(grade)
     if g == '1등':
-        return {'candidates': 18000, 'tries': 240000, 'score_shift': 5.8, 'max_num_use': 3, 'max_pair_use': 1, 'max_overlap': 3, 'history_overlap': 3}
+        return {'candidates': 2600, 'tries': 36000, 'score_shift': 5.8, 'max_num_use': 3, 'max_pair_use': 1, 'max_overlap': 3, 'history_overlap': 3, 'time_budget': 3.0}
     if g == '2등':
-        return {'candidates': 13000, 'tries': 180000, 'score_shift': 3.2, 'max_num_use': 4, 'max_pair_use': 1, 'max_overlap': 4, 'history_overlap': 4}
-    return {'candidates': 8500, 'tries': 120000, 'score_shift': 0.0, 'max_num_use': 5, 'max_pair_use': 2, 'max_overlap': 4, 'history_overlap': 5}
+        return {'candidates': 2100, 'tries': 30000, 'score_shift': 3.2, 'max_num_use': 4, 'max_pair_use': 1, 'max_overlap': 4, 'history_overlap': 4, 'time_budget': 2.8}
+    return {'candidates': 1600, 'tries': 24000, 'score_shift': 0.0, 'max_num_use': 5, 'max_pair_use': 2, 'max_overlap': 4, 'history_overlap': 5, 'time_budget': 2.5}
 
 
 def _v4_weight_profile(st, ext, mode='balanced', member_grade='일반'):
@@ -462,8 +465,16 @@ def make_premium_combos(count=10, fixed='', excluded='', mode='balanced', member
 
     candidates, seen = [], set()
     tries = 0
-    while len(candidates) < params['candidates'] and tries < params['tries']:
+    # Requested count controls workload. Ten combinations no longer generate thousands
+    # more candidates than necessary, and a hard monotonic time budget guarantees a response.
+    candidate_goal = min(params['candidates'], max(400, target * 60))
+    tries_limit = min(params['tries'], max(5000, target * 900))
+    generation_started = time.monotonic()
+    time_budget = float(params.get('time_budget') or 4.0)
+    while len(candidates) < candidate_goal and tries < tries_limit:
         tries += 1
+        if tries % 250 == 0 and (time.monotonic() - generation_started) >= time_budget:
+            break
         nums = set(fixed_set)
         plan = random.choice(plans)[:]
         random.shuffle(plan)
@@ -563,6 +574,8 @@ def make_premium_combos(count=10, fixed='', excluded='', mode='balanced', member
         'grade_strength': rc45_grade_strength_text(member_grade),
         'ai_v4_candidates': len(candidates),
         'ai_v4_attempts': tries,
+        'ai_v4_candidate_goal': candidate_goal,
+        'ai_v4_time_ms': int((time.monotonic() - generation_started) * 1000),
         'ai_v1_candidates': len(candidates),
         'ai_v1_attempts': tries,
         'rc55_history_checked': len(recent_history),

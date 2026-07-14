@@ -1652,7 +1652,7 @@ async function generate(){
   const selectedMemberId=$('genMember')?.value||'';
   applySelectedMemberPreferredCount();
   const next=await setNextDrawRound();
-  try{ await loadStats(0); }catch(e){ console.warn('최신 통계 갱신 실패', e); }
+  // STAGE8: generation API already reads the latest DB statistics; avoid a duplicate blocking request.
   const defaultRound = Number(next?.next_round || next?.latest_round || 0) || undefined;
   const body={
     member_id:selectedMemberId ? Number(selectedMemberId) : null,
@@ -1683,7 +1683,8 @@ async function generate(){
     renderRecommendationAnalysis(currentRecommendationAnalysis);
     renderEngine(d.engine,currentDetails);
     refreshSmsPreview();
-    await loadStats(0);
+    // Refresh statistics after rendering without blocking the generate button.
+    loadStats(0).catch(e=>console.warn('생성 후 통계 갱신 실패', e));
     if(selectedMemberId && $('genMember')) $('genMember').value=selectedMemberId;
     refreshSmsPreview();
     if(!quickMemberGenerationMode) scrollToMessagePanel();
