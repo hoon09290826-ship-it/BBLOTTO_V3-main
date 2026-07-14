@@ -366,7 +366,11 @@ class PgConnCompat:
 def con():
     if DB_ENGINE == 'postgresql':
         return PgConnCompat()
-    c = sqlite3.connect(DB); c.row_factory = sqlite3.Row; return c
+    c = sqlite3.connect(DB, timeout=15, check_same_thread=False)
+    c.row_factory = sqlite3.Row
+    c.execute('PRAGMA busy_timeout=15000')
+    c.execute('PRAGMA foreign_keys=ON')
+    return c
 
 def now(): return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -554,6 +558,10 @@ def _rc315_validate_draw_payload(round_no, numbers, bonus, allow_completed_only=
 
 def init_db():
     with con() as c:
+        if DB_ENGINE == 'sqlite':
+            # WAL allows reads while another request writes; NORMAL avoids excessive fsync cost.
+            c.execute('PRAGMA journal_mode=WAL')
+            c.execute('PRAGMA synchronous=NORMAL')
         c.execute('CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, name TEXT DEFAULT "관리자", password_hash TEXT NOT NULL, is_active INTEGER DEFAULT 1, created_at TEXT, last_login_at TEXT)')
         # V34 Priority4: 관리자 운영 컬럼을 기존 DB에 안전하게 추가
         admin_cols = table_cols(c, 'admins')
@@ -680,6 +688,23 @@ def init_db():
         except Exception:
             c.execute('UPDATE settings SET value=?, updated_at=? WHERE key=?', ('600', now(), 'session_timeout_minutes'))
         c.execute('INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)', ('auto_logout_warning_minutes', '5', now()))
+        # Frequently used lookup/sort indexes. CREATE IF NOT EXISTS is safe on every boot.
+        for index_sql in (
+            'CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)',
+            'CREATE INDEX IF NOT EXISTS idx_sessions_admin_created ON sessions(admin_id, created_at)',
+            'CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)',
+            'CREATE INDEX IF NOT EXISTS idx_members_admin_created ON members(created_by, created_at)',
+            'CREATE INDEX IF NOT EXISTS idx_members_name ON members(name)',
+            'CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone)',
+            'CREATE INDEX IF NOT EXISTS idx_recommendations_member_created ON recommendations(member_id, created_at)',
+            'CREATE INDEX IF NOT EXISTS idx_winning_checks_member_round ON winning_checks(member_id, round_no)',
+            'CREATE INDEX IF NOT EXISTS idx_sms_logs_member_created ON sms_logs(member_id, created_at)',
+            'CREATE INDEX IF NOT EXISTS idx_draws_round ON draws(round_no)',
+        ):
+            try:
+                c.execute(index_sql)
+            except Exception:
+                _log_suppressed_exception('00_core.py:create_index')
         # RC3-15: 운영 DB에 1232회처럼 추첨 전 회차가 잘못 저장되어 있으면 시작 시 자동 정리
         _rc315_clean_future_draws_in_conn(c)
         c.commit()
@@ -844,21 +869,29 @@ def ensure_daily_backup():
 init_db()
 ensure_daily_backup()
 
+from .repositories.session_repository import (
+    delete_session as _repo_delete_session,
+    get_active_admin_by_token as _repo_get_active_admin_by_token,
+    touch_session_if_due as _repo_touch_session_if_due,
+)
+
 def current_admin(authorization: str|None):
     if not authorization or not authorization.lower().startswith('bearer '):
         raise HTTPException(401, '로그인이 필요합니다.')
     token = authorization.split(' ',1)[1].strip()
-    with con() as c:
-        row = c.execute('SELECT s.token,s.expires_at,a.* FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token=? AND a.is_active=1', (token,)).fetchone()
-        if not row: raise HTTPException(401, '세션이 만료되었습니다.')
-        if row['expires_at'] < now():
-            c.execute('DELETE FROM sessions WHERE token=?', (token,)); c.commit()
-            raise HTTPException(401, '세션이 만료되었습니다.')
-        try:
-            c.execute('UPDATE sessions SET last_seen_at=? WHERE token=?', (now(), token)); c.commit()
-        except Exception:
-            _log_suppressed_exception("00_core.py:846")
-        return dict(row)
+    row = _repo_get_active_admin_by_token(con, token)
+    if not row:
+        raise HTTPException(401, '세션이 만료되었습니다.')
+    current_time = now()
+    if row['expires_at'] < current_time:
+        _repo_delete_session(con, token)
+        raise HTTPException(401, '세션이 만료되었습니다.')
+    try:
+        # 여러 화면 API가 동시에 호출돼도 세션 쓰기는 최대 60초에 한 번만 수행합니다.
+        _repo_touch_session_if_due(con, token, row['last_seen_at'] if 'last_seen_at' in row.keys() else '', current_time, 60)
+    except Exception:
+        _log_suppressed_exception("00_core.py:session_touch")
+    return dict(row)
 
 def require_admin(authorization: str|None = Header(default=None)):
     return current_admin(authorization)
