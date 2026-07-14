@@ -2032,3 +2032,44 @@ try:
 except Exception as _rc11_analysis_import_error:
     print('[BBLOTTO] RC11 analysis engine load failed:', repr(_rc11_analysis_import_error))
 # ===================== /RC11 EXPLAINABLE ANALYSIS OVERRIDE =====================
+
+# ===================== FULL-HISTORY FAST V12 FINAL ENGINE BINDING =====================
+# 가장 마지막에 등록해 이전 단계의 호환용 엔진 재정의를 확실히 대체합니다.
+try:
+    from .recommendation_engine import make_premium_combos as make_premium_combos
+    from .recommendation_engine import latest_stats as latest_stats
+    from .recommendation_engine import get_analysis_cache as get_analysis_cache
+    from .recommendation_engine import sync_official_full_history as sync_official_full_history
+    from .recommendation_engine import sync_official_history_step as sync_official_history_step
+    BBLOTTO_FINAL_ENGINE_VERSION = 'BBLOTTO_AI_FULL_HISTORY_FAST_V12'
+except Exception as _v12_final_engine_import_error:
+    print('[BBLOTTO] V12 final recommendation engine load failed:', repr(_v12_final_engine_import_error))
+# ===================== /FULL-HISTORY FAST V12 FINAL ENGINE BINDING =====================
+
+# ===================== V12 ENGINE METADATA SUMMARY =====================
+def _engine_summary(details, st):
+    scores = [float(d.get('score') or d.get('ai_score') or d.get('vip_score') or 0) for d in (details or [])]
+    scores = [s for s in scores if s]
+    version = st.get('engine_version') or 'BBLOTTO_AI_FULL_HISTORY_FAST_V12'
+    grade = rc45_grade_label(st.get('member_grade') or '일반')
+    return {
+        'version': version,
+        'engine_version': version,
+        'phase': 'FULL-HISTORY-FAST-V12',
+        'member_grade': grade,
+        'engine_label': _rc729_engine_name(grade),
+        'grade_strength': rc45_grade_strength_text(grade),
+        'avg_score': round(sum(scores) / len(scores), 1) if scores else 0,
+        'max_score': round(max(scores), 1) if scores else 0,
+        'min_score': round(min(scores), 1) if scores else 0,
+        'candidate_count': int(st.get('candidate_count') or 0),
+        'selected_count': len(details or []),
+        'latest_round': int(st.get('latest_round') or 0),
+        'draw_count': int(st.get('draw_count') or 0),
+        'generation_ms': float(st.get('generation_ms') or 0),
+        'cache_build_ms': float(st.get('cache_build_ms') or 0),
+        'analysis_confirm': st.get('analysis_confirm') or '',
+        'methodology': st.get('methodology') or [],
+        'summary': '1회차부터 DB 최신 회차까지 전체 이력을 캐시 분석하고, 다중 기간 흐름·미출현 간격·동반출현·조합 구조·포트폴리오 중복을 함께 평가합니다.',
+    }
+# ===================== /V12 ENGINE METADATA SUMMARY =====================
