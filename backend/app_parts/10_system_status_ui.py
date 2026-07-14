@@ -54,7 +54,7 @@ def rc5_13_status():
         ('requirements.txt', BASE / 'requirements.txt'),
         ('runtime.txt', BASE / 'runtime.txt'),
         ('frontend/index.html', FRONT / 'index.html'),
-        ('frontend/app.js', FRONT / 'app.js'),
+        ('frontend/js/00_core.js', FRONT / 'js' / '00_core.js'),
         ('frontend/login.html', FRONT / 'login.html'),
         ('frontend/login.js', FRONT / 'login.js'),
     ]
@@ -124,7 +124,7 @@ def rc5_14_status():
         ('.env.example', BASE / '.env.example'),
         ('.gitignore', BASE / '.gitignore'),
         ('frontend/index.html', FRONT / 'index.html'),
-        ('frontend/app.js', FRONT / 'app.js'),
+        ('frontend/js/00_core.js', FRONT / 'js' / '00_core.js'),
         ('frontend/style.css', FRONT / 'style.css'),
     ]
     for name, path in required_files:
@@ -203,7 +203,7 @@ def rc5_15_status():
         ('.env.example', BASE / '.env.example'),
         ('.gitignore', BASE / '.gitignore'),
         ('frontend/index.html', FRONT / 'index.html'),
-        ('frontend/app.js', FRONT / 'app.js'),
+        ('frontend/js/00_core.js', FRONT / 'js' / '00_core.js'),
         ('frontend/style.css', FRONT / 'style.css'),
     ]
     for name, path in required_files:
@@ -223,7 +223,7 @@ def rc5_15_status():
         add('railway_start_command_ready', False, str(e))
 
     try:
-        app_js = (FRONT / 'app.js').read_text(encoding='utf-8')
+        app_js = '\n'.join(path.read_text(encoding='utf-8') for path in sorted((FRONT / 'js').glob('*.js')))
         login_js = (FRONT / 'login.js').read_text(encoding='utf-8') if (FRONT / 'login.js').exists() else ''
         hardcoded = []
         for token in ('localhost:', '127.0.0.1:', 'http://localhost', 'http://127.0.0.1'):
@@ -599,15 +599,22 @@ def dashboard_page(): return FileResponse(FRONT/'index.html')
 def style_css():
     return FileResponse(FRONT/'style.css', media_type='text/css', headers={'Cache-Control':'no-store, max-age=0'})
 
-@router.get('/app.js')
-def app_js():
-    return FileResponse(FRONT/'app.js', media_type='application/javascript', headers={'Cache-Control':'no-store, max-age=0'})
+@router.get('/js/{filename}')
+def frontend_js(filename: str):
+    # Stage 9: split frontend bundles. Only direct .js filenames are served.
+    safe_name = Path(filename).name
+    if safe_name != filename or not safe_name.endswith('.js'):
+        raise HTTPException(status_code=404, detail='JavaScript file not found')
+    target = FRONT / 'js' / safe_name
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail='JavaScript file not found')
+    return FileResponse(target, media_type='application/javascript', headers={'Cache-Control':'no-store, max-age=0'})
 
 
 
 @router.get('/api/ui-health')
 def ui_health():
-    return {'ok': True, 'version': 'STABLE-CORE-1', 'event_owner': 'app.js', 'fallback_file': None, 'single_event_owner': True}
+    return {'ok': True, 'version': 'STABLE-CORE-1', 'event_owner': 'frontend/js/*.js', 'fallback_file': None, 'single_event_owner': True}
 
 @router.get('/login.js')
 def login_js():

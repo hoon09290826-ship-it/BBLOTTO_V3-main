@@ -358,7 +358,7 @@ def _s4_disk_status():
         return {'error': str(e)}
 
 def _s4_required_files():
-    required = ['backend/app.py','frontend/index.html','frontend/app.js','frontend/login.html','frontend/login.js','requirements.txt','Dockerfile','Procfile']
+    required = ['backend/app.py','frontend/index.html','frontend/js/00_core.js','frontend/login.html','frontend/login.js','requirements.txt','Dockerfile','Procfile']
     rows=[]
     for rel in required:
         p = BASE / rel

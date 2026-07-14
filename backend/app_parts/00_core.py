@@ -120,7 +120,7 @@ async def rc11_security_headers(request: Request, call_next):
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
         "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     )
-    if request.url.path.startswith('/api/') or request.url.path in {'/','/dashboard','/app.js','/login.js','/style.css'}:
+    if request.url.path.startswith('/api/') or request.url.path.startswith('/js/') or request.url.path in {'/','/dashboard','/login.js','/style.css'}:
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'

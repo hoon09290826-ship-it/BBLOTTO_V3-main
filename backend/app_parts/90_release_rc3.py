@@ -64,7 +64,7 @@ def sprint6_smoke_test(authorization: str|None = Header(default=None)):
             results.append({'name': name, 'ok': bool(data.get('ok', False)), 'message': data.get('summary','OK')})
         except Exception as e:
             results.append({'name': name, 'ok': False, 'message': str(e)})
-    files = [_s6_file_fingerprint(x) for x in ['backend/app.py','frontend/index.html','frontend/app.js','requirements.txt','Procfile','Dockerfile','START_HERE_DEPLOY.md']]
+    files = [_s6_file_fingerprint(x) for x in ['backend/app.py','frontend/index.html','frontend/js/00_core.js','requirements.txt','Procfile','Dockerfile','START_HERE_DEPLOY.md']]
     ok = all(r['ok'] for r in results) and all(f['exists'] for f in files)
     try:
         log_admin(admin.get('username','admin'), 'rc_smoke_test', f'ok={ok}', '')
