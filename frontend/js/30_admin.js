@@ -120,28 +120,19 @@ async function checkAiV6CacheStatus(){
 }
 
 async function syncAiV6FullHistory(){
-  if(!confirm('1회차부터 현재 추첨 완료 회차까지 자동 동기화/분석을 시작할까요? Railway 오류 방지를 위해 나눠서 저장합니다.')) return;
-  setBusy('syncAiV6FullHistory', true, '동기화/분석 중...');
-  setText('aiV6CacheBadge', '진행 중');
-  setHTML('aiV6CacheStatus', '전체 회차를 나눠서 저장 중입니다. 창을 닫지 말고 기다려주세요.');
+  if(!confirm('현재 DB에 저장된 1회차부터 최신 회차까지 AI 캐시를 다시 분석할까요?')) return;
+  setBusy('syncAiV6FullHistory', true, '재분석 중...');
+  setText('aiV6CacheBadge', '분석 중');
+  setHTML('aiV6CacheStatus', '저장된 당첨 회차를 AI 캐시에 반영하고 있습니다.');
   try{
-    let last = null;
-    for(let i=1;i<=40;i++){
-      const d = await api('/api/admin/ai-v6/full-sync-step?chunk_size=25', {method:'POST'});
-      if(d && d.ok === false && d.retryable){
-        throw new Error(d.message || '회차 동기화 처리 중 오류가 발생했습니다.');
-      }
-      last = d;
-      const c = d.cache || d;
-      renderAiV6CacheStatus(c);
-      const actual = Number(c.actual_count || 0);
-      const expected = Number(c.expected_count || c.target_round || 0);
-      setText('aiV6CacheBadge', d.completed ? '전체 저장 완료' : `진행 중 ${actual}/${expected}`);
-      if(d.completed || c.is_full_history) break;
-      await new Promise(r=>setTimeout(r, 350));
-    }
-    const done = !!(last?.completed || last?.cache?.is_full_history || last?.is_full_history);
-    toast(done ? `1~${Number((last?.cache||last)?.target_round||0)} 전체 회차 분석 저장 완료` : '아직 일부 회차가 남았습니다. 버튼을 한 번 더 눌러 이어서 진행하세요.');
+    const d = await api('/api/admin/ai-v6/full-sync-step', {method:'POST'});
+    const c = d.cache || d;
+    renderAiV6CacheStatus(c);
+    const actual = Number(c.actual_count || c.draw_count || 0);
+    const expected = Number(c.expected_count || c.latest_round || 0);
+    const done = !!(d.completed || c.is_full_history);
+    setText('aiV6CacheBadge', done ? '전체 분석 완료' : `${actual}/${expected} 분석`);
+    toast(done ? `1~${Number(c.latest_round||0)}회 전체 분석 완료` : `캐시 분석 결과 ${actual}/${expected}회`);
   }finally{
     setBusy('syncAiV6FullHistory', false);
   }

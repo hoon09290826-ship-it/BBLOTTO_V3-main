@@ -1723,94 +1723,93 @@ except Exception as _v6_sync_import_error:
 
 
 # =========================================================
-# BBLOTTO AI V6 관리자 화면용 전체 동기화/분석 API
-# - 관리자 버튼에서 사용: POST /api/admin/ai-v6/full-sync
-# - 주소 직접 입력 시 Not Found 대신 안내/실행 가능 여부 반환
+# BBLOTTO AI V13 관리자 캐시 상태/재분석 API
+# - AI-01~04의 persistent cache_engine을 관리자 화면에 직접 연결
+# - 외부 회차 동기화와 캐시 재분석을 분리하여 0/0 무한 대기 방지
 # =========================================================
 try:
-    from .recommendation_engine import sync_official_full_history as _bb_v6_sync_full_ui
-    from .recommendation_engine import get_analysis_cache as _bb_v6_cache_ui
+    from .ai.cache_engine import (
+        get_analysis_cache as _ai_v13_get_cache,
+        get_cache_status as _ai_v13_get_status,
+        refresh_cache as _ai_v13_refresh_cache,
+        request_background_refresh as _ai_v13_request_refresh,
+    )
 
-    @router.post('/api/admin/ai-v6/full-sync')
-    def admin_ai_v6_full_sync(authorization: str|None = Header(default=None), max_round: int|None = None):
-        require_admin(authorization)
-        sync_result = _bb_v6_sync_full_ui(max_round=max_round)
-        cache = _bb_v6_cache_ui(True, target_round=max_round)
+    def _ai_v13_admin_payload(cache):
+        cache = cache or {}
+        actual = int(cache.get('actual_count') or cache.get('draw_count') or 0)
+        latest = int(cache.get('latest_round') or 0)
+        expected = int(cache.get('expected_count') or latest or actual)
+        first = 0
+        rr = cache.get('round_range') or [0, latest]
+        if isinstance(rr, (list, tuple)) and rr:
+            try: first = int(rr[0] or 0)
+            except Exception: first = 0
+        full = bool(cache.get('is_full_history') or (first == 1 and actual > 0 and actual == expected))
         return {
             'ok': True,
-            'message': sync_result.get('message') or (f'1회차~{cache.get("target_round", max_round)}회차 전체 동기화/분석 저장 완료' if cache.get('is_full_history') else f'전체 분석 미완료: {cache.get("missing_rounds_count", 0)}개 누락'),
-            'completed': bool(cache.get('is_full_history')),
-            'sync_result': sync_result,
-            'cache': {
-                'engine_version': cache.get('engine_version'),
-                'cache_storage': cache.get('cache_storage'),
-                'analysis_confirm': cache.get('analysis_confirm'),
-                'actual_count': cache.get('actual_count'),
-                'expected_count': cache.get('expected_count'),
-                'round_range': cache.get('round_range'),
-                'latest_round': cache.get('latest_round'),
-                'target_round': cache.get('target_round'),
-                'is_full_history': cache.get('is_full_history'),
-                'missing_rounds_count': cache.get('missing_rounds_count'),
-                'missing_rounds_sample': cache.get('missing_rounds_sample'),
-            }
+            'engine_version': cache.get('engine_version') or 'BBLOTTO_AI_CACHE_V13',
+            'cache_storage': cache.get('cache_storage') or 'database+persistent-memory',
+            'analysis_confirm': cache.get('analysis_confirm') or (f'1회차부터 {latest}회차까지 {actual}개 회차 분석' if actual else '분석 데이터 없음'),
+            'actual_count': actual,
+            'draw_count': actual,
+            'expected_count': expected,
+            'round_range': rr,
+            'latest_round': latest,
+            'target_round': latest,
+            'is_full_history': full,
+            'missing_rounds_count': int(cache.get('missing_rounds_count') or max(0, expected-actual)),
+            'missing_rounds_sample': cache.get('missing_rounds_sample') or [],
+            'cache_update_mode': cache.get('cache_update_mode') or cache.get('last_update_mode') or '-',
+            'incremental_added_rounds': int(cache.get('incremental_added_rounds') or 0),
+            'refresh_running': bool(cache.get('refresh_running', False)),
+            'last_refresh_error': cache.get('last_refresh_error') or '',
         }
-
-
-    from .recommendation_engine import sync_official_history_step as _bb_v6_sync_step_ui
-
-    @router.post('/api/admin/ai-v6/full-sync-step')
-    def admin_ai_v6_full_sync_step(authorization: str|None = Header(default=None), max_round: int|None = None, chunk_size: int = 25):
-        require_admin(authorization)
-        try:
-            return _bb_v6_sync_step_ui(max_round=max_round, chunk_size=chunk_size)
-        except Exception as exc:
-            # 브라우저에는 원인을 알 수 없는 500 오류 대신 재시도 가능한 안내를 반환합니다.
-            print('[BBLOTTO] AI V7 step sync failed:', repr(exc))
-            return {
-                'ok': False,
-                'completed': False,
-                'message': '회차 동기화 처리 중 오류가 발생했습니다. 잠시 후 다시 실행해주세요.',
-                'error_type': type(exc).__name__,
-                'retryable': True,
-            }
 
     @router.get('/api/admin/ai-v6/cache-status')
     def admin_ai_v6_cache_status(authorization: str|None = Header(default=None), target_round: int|None = None):
         require_admin(authorization)
-        cache = _bb_v6_cache_ui(False, target_round=target_round)
-        return {
-            'ok': True,
-            'engine_version': cache.get('engine_version'),
-            'cache_storage': cache.get('cache_storage'),
-            'analysis_confirm': cache.get('analysis_confirm'),
-            'actual_count': cache.get('actual_count'),
-            'expected_count': cache.get('expected_count'),
-            'round_range': cache.get('round_range'),
-            'latest_round': cache.get('latest_round'),
-            'target_round': cache.get('target_round'),
-            'is_full_history': cache.get('is_full_history'),
-            'missing_rounds_count': cache.get('missing_rounds_count'),
-            'missing_rounds_sample': cache.get('missing_rounds_sample'),
-        }
+        cache = _ai_v13_get_cache(force=False, target_round=target_round)
+        return _ai_v13_admin_payload(cache)
+
+    @router.get('/api/ai-engine/v6-cache')
+    def ai_engine_v6_cache_compat(authorization: str|None = Header(default=None), target_round: int|None = None):
+        require_admin(authorization)
+        cache = _ai_v13_get_cache(force=False, target_round=target_round)
+        return _ai_v13_admin_payload(cache)
+
+    @router.post('/api/admin/ai-v6/full-sync-step')
+    def admin_ai_v6_full_sync_step(authorization: str|None = Header(default=None), max_round: int|None = None, chunk_size: int = 25):
+        require_admin(authorization)
+        # DB에 이미 저장된 1회~최신회 데이터를 즉시 재분석한다.
+        # 외부 복권 서버 통신은 하지 않아 버튼이 멈추지 않는다.
+        cache = _ai_v13_refresh_cache(force=True)
+        payload = _ai_v13_admin_payload(cache)
+        payload.update({'completed': bool(payload['is_full_history']), 'cache': dict(payload), 'saved': 0})
+        return payload
+
+    @router.post('/api/admin/ai-v6/full-sync')
+    def admin_ai_v6_full_sync(authorization: str|None = Header(default=None), max_round: int|None = None):
+        require_admin(authorization)
+        cache = _ai_v13_refresh_cache(force=True)
+        payload = _ai_v13_admin_payload(cache)
+        return {'ok': True, 'completed': bool(payload['is_full_history']), 'message': payload['analysis_confirm'], 'cache': payload}
+
+    @router.post('/api/ai-engine/v6-sync-full')
+    def ai_engine_v6_sync_full(authorization: str|None = Header(default=None), max_round: int|None = None):
+        require_admin(authorization)
+        cache = _ai_v13_refresh_cache(force=True)
+        return _ai_v13_admin_payload(cache)
 
     @router.get('/admin/sync-full-history')
     def admin_sync_full_history_url_notice(authorization: str|None = Header(default=None), max_round: int|None = None):
-        # 브라우저 주소창 직접 입력 시 기존처럼 Not Found가 나오지 않도록 안내한다.
-        # 실제 실행은 로그인 후 관리자 화면 버튼 또는 Authorization 헤더가 있는 요청에서만 가능하다.
         if not authorization:
-            return {
-                'ok': False,
-                'message': '주소창 직접 입력은 로그인 토큰이 없어 실행하지 않습니다. 관리자 화면 > AI 엔진 > 전체 회차 동기화 버튼을 눌러주세요.',
-                'api': '/api/admin/ai-v6/full-sync',
-                'target_round': max_round
-            }
+            return {'ok': False, 'message': '관리자 화면의 AI 엔진 탭에서 캐시 상태 확인 또는 재분석 버튼을 사용해주세요.'}
         require_admin(authorization)
-        sync_result = _bb_v6_sync_full_ui(max_round=max_round)
-        cache = _bb_v6_cache_ui(True, target_round=max_round)
-        return {'ok': bool(cache.get('is_full_history')), 'message': sync_result.get('message') or ('전체 저장/분석 완료' if cache.get('is_full_history') else '전체 분석 미완료'), 'sync_result': sync_result, 'cache': cache}
-except Exception as _bb_v6_ui_sync_error:
-    print('[BBLOTTO] AI V6 admin UI sync endpoint failed:', _bb_v6_ui_sync_error)
+        cache = _ai_v13_refresh_cache(force=True)
+        return _ai_v13_admin_payload(cache)
+except Exception as _ai_v13_admin_cache_error:
+    print('[BBLOTTO] AI V13 admin cache endpoint failed:', repr(_ai_v13_admin_cache_error))
 
 
 # ===================== RC10.2 DYNAMIC MEMBER-FRIENDLY ANALYSIS =====================
