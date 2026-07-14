@@ -13,10 +13,14 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-CACHE_ENGINE_VERSION = "BBLOTTO_AI_CACHE_V13_01"
+CACHE_ENGINE_VERSION = "BBLOTTO_AI_CACHE_V13_04"
 _CACHE_KEY = "full_history_statistics"
 _LOCK = threading.RLock()
 _MEMORY: Dict[str, Any] = {}
+_REFRESH_THREAD: Optional[threading.Thread] = None
+_REFRESH_REQUESTED = threading.Event()
+_STOP_REQUESTED = threading.Event()
+_SIGNATURE_TTL_SECONDS = max(5, int(os.getenv("BBLOTTO_AI_SIGNATURE_TTL", "30") or 30))
 
 
 def _normalize_database_url(url: str) -> str:
@@ -371,18 +375,94 @@ def _refresh(force: bool = False) -> Dict[str, Any]:
     return payload
 
 
+def refresh_cache(force: bool = False) -> Dict[str, Any]:
+    """캐시를 동기 갱신합니다. 관리자 강제 갱신이나 최초 부팅에만 사용합니다."""
+    signature = _source_signature()
+    payload = _refresh(force=force)
+    with _LOCK:
+        _MEMORY.clear()
+        _MEMORY.update({
+            "signature": signature,
+            "payload": payload,
+            "signature_checked_at": time.monotonic(),
+            "refreshing": False,
+            "last_error": "",
+        })
+    return payload
+
+
+def _background_refresh_worker() -> None:
+    with _LOCK:
+        _MEMORY["refreshing"] = True
+    try:
+        signature = _source_signature()
+        with _LOCK:
+            previous = _MEMORY.get("signature")
+            has_payload = bool(_MEMORY.get("payload"))
+        if not has_payload or signature != previous:
+            payload = _refresh(force=False)
+            with _LOCK:
+                _MEMORY["signature"] = signature
+                _MEMORY["payload"] = payload
+                _MEMORY["last_error"] = ""
+        with _LOCK:
+            _MEMORY["signature_checked_at"] = time.monotonic()
+    except Exception as exc:
+        with _LOCK:
+            _MEMORY["last_error"] = f"{type(exc).__name__}: {exc}"
+            _MEMORY["signature_checked_at"] = time.monotonic()
+    finally:
+        with _LOCK:
+            _MEMORY["refreshing"] = False
+
+
+def request_background_refresh(force_check: bool = False) -> bool:
+    """사용자 요청을 막지 않고 새 회차 여부를 백그라운드에서 확인합니다."""
+    global _REFRESH_THREAD
+    now = time.monotonic()
+    with _LOCK:
+        checked_at = float(_MEMORY.get("signature_checked_at", 0.0) or 0.0)
+        if not force_check and now - checked_at < _SIGNATURE_TTL_SECONDS:
+            return False
+        if bool(_MEMORY.get("refreshing")):
+            return False
+        _MEMORY["refreshing"] = True
+    thread = threading.Thread(target=_background_refresh_worker, name="bblotto-ai-cache-refresh", daemon=True)
+    _REFRESH_THREAD = thread
+    thread.start()
+    return True
+
+
+def get_cache_status() -> Dict[str, Any]:
+    with _LOCK:
+        payload = dict(_MEMORY.get("payload") or {})
+        return {
+            "engine_version": CACHE_ENGINE_VERSION,
+            "latest_round": int(payload.get("latest_round", 0) or 0),
+            "draw_count": int(payload.get("draw_count", 0) or 0),
+            "refreshing": bool(_MEMORY.get("refreshing")),
+            "last_error": str(_MEMORY.get("last_error", "") or ""),
+            "signature_ttl_seconds": _SIGNATURE_TTL_SECONDS,
+        }
+
+
 def get_analysis_cache(
     force: bool = False,
     target_round: Optional[int] = None,
     recommendation_engine_version: str = "",
 ) -> Dict[str, Any]:
-    signature = _source_signature()
+    # 최초 1회만 동기로 구성하고 이후에는 stale-while-revalidate 방식으로 즉시 반환합니다.
     with _LOCK:
-        if force or _MEMORY.get("signature") != signature:
-            payload = _refresh(force=force)
-            _MEMORY.clear()
-            _MEMORY.update({"signature": signature, "payload": payload})
+        has_payload = bool(_MEMORY.get("payload"))
+    if force or not has_payload:
+        refresh_cache(force=force)
+    else:
+        request_background_refresh(force_check=False)
+
+    with _LOCK:
         result = dict(_MEMORY.get("payload") or {})
+        result["background_refreshing"] = bool(_MEMORY.get("refreshing"))
+        result["cache_last_error"] = str(_MEMORY.get("last_error", "") or "")
     result.pop("_draw_history", None)
     result["recommendation_engine_version"] = recommendation_engine_version
     if target_round:

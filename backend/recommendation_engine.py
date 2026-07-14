@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .ai.cache_engine import get_analysis_cache as _persistent_analysis_cache
+from .ai.scheduler import ensure_scheduler_started as _ensure_ai_scheduler_started
 from .ai.score_engine import (
     SCORE_ENGINE_VERSION,
     build_number_weights as _build_number_weights,
@@ -25,7 +26,8 @@ from .ai.score_engine import (
     triple_strength as _score_triple_strength,
 )
 
-ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_V13_02"
+ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_V13_04"
+_ensure_ai_scheduler_started()
 _CACHE_LOCK = threading.RLock()
 _MEMORY_CACHE: Dict[str, Any] = {}
 _SYNC_LOCK = threading.Lock()
