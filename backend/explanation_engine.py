@@ -1,8 +1,4 @@
-"""Compatibility entry point for BBLOTTO AI-03 explanation engine.
-
-The recommendation engine generates numbers; this module only explains the
-actual AI-01 cache and AI-02 recommendation output in 3-5 concise Korean lines.
-"""
+"""Compatibility entry point for BBLOTTO explanation engine."""
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -10,7 +6,7 @@ from typing import Any, Dict, List
 from .ai.explanation_engine import (
     EXPLANATION_ENGINE_VERSION,
     build_round_analysis,
-    build_recommendation_analysis as _build_actual_recommendation_analysis,
+    build_recommendation_analysis as _build_recommendation_analysis,
 )
 
 
@@ -26,7 +22,7 @@ def build_evidence_analysis(
 
 
 def build_recommendation_analysis(round_no: int, details: List[Dict[str, Any]]) -> str:
-    return _build_actual_recommendation_analysis(round_no, details)
+    return _build_recommendation_analysis(round_no, details)
 
 
 __all__ = [

@@ -300,3 +300,18 @@ def build_round_analysis(
         lines.append(condition)
     return "\n".join(lines[:5])
 
+
+
+def build_recommendation_analysis(
+    round_no: int,
+    details: Sequence[Mapping[str, Any]],
+) -> str:
+    """Compatibility API used by /api/generate for the same actual-combo analysis."""
+    return build_round_analysis(round_no, {}, "balanced", None, None, details)
+
+
+__all__ = [
+    "EXPLANATION_ENGINE_VERSION",
+    "build_round_analysis",
+    "build_recommendation_analysis",
+]
