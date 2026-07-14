@@ -8,6 +8,8 @@ import sqlite3
 import threading
 import time
 import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
 from itertools import combinations
 from pathlib import Path
@@ -124,6 +126,124 @@ def _fetch_draws(after_round: int = 0) -> List[Dict[str, Any]]:
                 "bonus": int(bonus or 0),
             })
     return draws
+
+
+
+def _source_rounds() -> List[int]:
+    """Return every valid round number currently stored in the primary draws table."""
+    url = _database_url()
+    if url:
+        try:
+            import psycopg2
+            with psycopg2.connect(url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT round_no FROM draws ORDER BY round_no")
+                    return [int(row[0]) for row in cur.fetchall() if int(row[0] or 0) > 0]
+        except Exception:
+            return []
+    path = _sqlite_path()
+    if not path.exists():
+        return []
+    try:
+        with sqlite3.connect(str(path), timeout=15) as conn:
+            return [int(row[0]) for row in conn.execute("SELECT round_no FROM draws ORDER BY round_no").fetchall() if int(row[0] or 0) > 0]
+    except sqlite3.DatabaseError:
+        return []
+
+
+def _official_fetch(round_no: int, timeout: int = 5) -> Optional[Dict[str, Any]]:
+    """Fetch one official draw. Used only by the administrator repair action."""
+    url = f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={int(round_no)}"
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 BBLOTTO/13"})
+        with urllib.request.urlopen(request, timeout=max(2, int(timeout))) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        if data.get("returnValue") != "success":
+            return None
+        numbers = [int(data[f"drwtNo{i}"]) for i in range(1, 7)]
+        if len(numbers) != 6:
+            return None
+        return {
+            "round": int(data["drwNo"]),
+            "date": str(data.get("drwNoDate") or ""),
+            "numbers": sorted(numbers),
+            "bonus": int(data.get("bnusNo") or 0),
+        }
+    except Exception:
+        return None
+
+
+def _save_repaired_draws(draws: Sequence[Dict[str, Any]]) -> int:
+    if not draws:
+        return 0
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    url = _database_url()
+    if url:
+        import psycopg2
+        with psycopg2.connect(url) as conn:
+            with conn.cursor() as cur:
+                for draw in draws:
+                    cur.execute(
+                        """
+                        INSERT INTO draws(round_no,draw_date,numbers,bonus,source,updated_at)
+                        VALUES(%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT(round_no) DO UPDATE SET
+                          draw_date=EXCLUDED.draw_date,
+                          numbers=EXCLUDED.numbers,
+                          bonus=EXCLUDED.bonus,
+                          source=EXCLUDED.source,
+                          updated_at=EXCLUDED.updated_at
+                        """,
+                        (draw["round"], draw.get("date", ""), json.dumps(draw["numbers"]), draw.get("bonus", 0), "official_repair", now),
+                    )
+        return len(draws)
+    path = _sqlite_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(path), timeout=20) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS draws(round_no INTEGER PRIMARY KEY, draw_date TEXT DEFAULT '', numbers TEXT, bonus INTEGER, source TEXT DEFAULT 'manual', updated_at TEXT)")
+        conn.executemany(
+            "INSERT OR REPLACE INTO draws(round_no,draw_date,numbers,bonus,source,updated_at) VALUES(?,?,?,?,?,?)",
+            [(d["round"], d.get("date", ""), json.dumps(d["numbers"]), d.get("bonus", 0), "official_repair", now) for d in draws],
+        )
+    return len(draws)
+
+
+def repair_missing_history(max_round: Optional[int] = None, chunk_size: int = 25) -> Dict[str, Any]:
+    """Fill a bounded batch of missing source draws, then rebuild the analysis cache.
+
+    The endpoint calls this repeatedly, avoiding a single long request while still
+    repairing old partial databases such as 1131~1232-only installations.
+    """
+    rounds = _source_rounds()
+    latest = int(max_round or (max(rounds) if rounds else 0))
+    if latest <= 0:
+        payload = refresh_cache(force=True)
+        return {"ok": True, "saved": 0, "completed": False, "cache": payload, "message": "당첨 회차 데이터가 없습니다."}
+    existing = set(rounds)
+    missing = [round_no for round_no in range(1, latest + 1) if round_no not in existing]
+    batch = missing[:max(1, min(int(chunk_size or 25), 100))]
+    fetched: List[Dict[str, Any]] = []
+    if batch:
+        workers = min(8, len(batch))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="bblotto-history-repair") as executor:
+            futures = {executor.submit(_official_fetch, round_no): round_no for round_no in batch}
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    fetched.append(result)
+        fetched.sort(key=lambda item: item["round"])
+        _save_repaired_draws(fetched)
+    payload = refresh_cache(force=True)
+    remaining = int(payload.get("missing_rounds_count", 0) or 0)
+    return {
+        "ok": True,
+        "saved": len(fetched),
+        "requested": len(batch),
+        "completed": remaining == 0 and bool(payload.get("is_full_history")),
+        "remaining": remaining,
+        "cache": payload,
+        "message": "전체 회차 복구 완료" if remaining == 0 else f"누락 회차 복구 중: {remaining}개 남음",
+    }
 
 
 def _ensure_cache_table() -> None:
@@ -301,6 +421,8 @@ def _materialize(draws: List[Dict[str, Any]], started: float, update_mode: str, 
     overdue = sorted(range(1, 46), key=lambda n: (-gaps[n], n))
     cold = sorted(range(1, 46), key=lambda n: (frequencies[30][n], frequencies[100][n], n))
     first_round = draws[0]["round"] if draws else 0
+    present_rounds = {int(draw["round"]) for draw in draws}
+    missing_rounds = [round_no for round_no in range(1, latest_round + 1) if round_no not in present_rounds]
     return {
         "engine_version": CACHE_ENGINE_VERSION,
         "recommendation_engine_version": "",
@@ -311,8 +433,8 @@ def _materialize(draws: List[Dict[str, Any]], started: float, update_mode: str, 
         "draw_count": len(draws), "actual_count": len(draws), "expected_count": latest_round,
         "round_range": [first_round, latest_round], "latest_round": latest_round,
         "target_round": latest_round + 1 if latest_round else 1,
-        "is_full_history": bool(draws and first_round == 1 and len(draws) == latest_round),
-        "missing_rounds_count": max(0, latest_round - len(draws)), "missing_rounds_sample": [],
+        "is_full_history": bool(draws and first_round == 1 and not missing_rounds),
+        "missing_rounds_count": len(missing_rounds), "missing_rounds_sample": missing_rounds[:20],
         "frequency10": {str(n): frequencies[10][n] for n in range(1, 46)},
         "frequency30": {str(n): frequencies[30][n] for n in range(1, 46)},
         "frequency50": {str(n): frequencies[50][n] for n in range(1, 46)},
@@ -348,9 +470,12 @@ def _refresh(force: bool = False) -> Dict[str, Any]:
     history = list((persisted or {}).get("_draw_history") or [])
     cached_latest = int((persisted or {}).get("latest_round", 0))
     cached_count = int((persisted or {}).get("draw_count", 0))
+    cached_first = int(history[0].get("round", 0)) if history else 0
+    cached_rounds = {int(item.get("round", 0)) for item in history if int(item.get("round", 0)) > 0}
+    cached_complete = bool(history and cached_first == 1 and cached_latest > 0 and len(cached_rounds) == cached_latest)
     append_only = bool(
-        persisted and history and first_round == 1 and cached_count == len(history)
-        and count >= cached_count and latest_round >= cached_latest
+        persisted and cached_complete and cached_count == len(history)
+        and first_round == 1 and count >= cached_count and latest_round >= cached_latest
         and (count - cached_count) == (latest_round - cached_latest)
     )
     if append_only:

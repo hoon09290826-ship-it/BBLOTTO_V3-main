@@ -120,19 +120,33 @@ async function checkAiV6CacheStatus(){
 }
 
 async function syncAiV6FullHistory(){
-  if(!confirm('현재 DB에 저장된 1회차부터 최신 회차까지 AI 캐시를 다시 분석할까요?')) return;
-  setBusy('syncAiV6FullHistory', true, '재분석 중...');
-  setText('aiV6CacheBadge', '분석 중');
-  setHTML('aiV6CacheStatus', '저장된 당첨 회차를 AI 캐시에 반영하고 있습니다.');
+  if(!confirm('누락된 당첨 회차를 복구하고 1회차부터 최신 회차까지 AI 캐시를 다시 분석할까요?')) return;
+  setBusy('syncAiV6FullHistory', true, '전체 회차 복구 중...');
+  setText('aiV6CacheBadge', '복구 중');
+  setHTML('aiV6CacheStatus', '누락된 회차를 나누어 복구하고 있습니다. 이 화면을 닫지 마세요.');
   try{
-    const d = await api('/api/admin/ai-v6/full-sync-step', {method:'POST'});
-    const c = d.cache || d;
-    renderAiV6CacheStatus(c);
-    const actual = Number(c.actual_count || c.draw_count || 0);
-    const expected = Number(c.expected_count || c.latest_round || 0);
-    const done = !!(d.completed || c.is_full_history);
-    setText('aiV6CacheBadge', done ? '전체 분석 완료' : `${actual}/${expected} 분석`);
-    toast(done ? `1~${Number(c.latest_round||0)}회 전체 분석 완료` : `캐시 분석 결과 ${actual}/${expected}회`);
+    let done = false;
+    let latest = 0;
+    let loops = 0;
+    while(!done && loops < 80){
+      loops += 1;
+      const d = await api('/api/admin/ai-v6/full-sync-step?chunk_size=25', {method:'POST'});
+      const c = d.cache || d;
+      renderAiV6CacheStatus(c);
+      const actual = Number(c.actual_count || c.draw_count || 0);
+      const expected = Number(c.expected_count || c.latest_round || 0);
+      const remaining = Number(d.remaining ?? c.missing_rounds_count ?? Math.max(0, expected-actual));
+      latest = Number(c.latest_round || latest || 0);
+      done = !!(d.completed || c.is_full_history || remaining === 0);
+      setText('aiV6CacheBadge', done ? '전체 분석 완료' : `${actual}/${expected} 복구 중`);
+      if(!done){
+        setHTML('aiV6CacheStatus', `${document.getElementById('aiV6CacheStatus')?.innerHTML || ''}<br><b>진행:</b> 이번 단계 ${Number(d.saved||0)}개 저장 / ${remaining}개 남음`);
+        if(Number(d.saved||0) === 0) throw new Error('누락 회차를 가져오지 못했습니다. Render 로그와 외부 네트워크 연결을 확인해주세요.');
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+    }
+    if(!done) throw new Error('복구 작업이 제한 횟수 안에 완료되지 않았습니다. 버튼을 다시 눌러 이어서 진행해주세요.');
+    toast(`1~${latest}회 전체 분석 완료`);
   }finally{
     setBusy('syncAiV6FullHistory', false);
   }

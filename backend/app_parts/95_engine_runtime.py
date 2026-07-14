@@ -1733,6 +1733,7 @@ try:
         get_cache_status as _ai_v13_get_status,
         refresh_cache as _ai_v13_refresh_cache,
         request_background_refresh as _ai_v13_request_refresh,
+        repair_missing_history as _ai_v13_repair_missing_history,
     )
 
     def _ai_v13_admin_payload(cache):
@@ -1781,19 +1782,26 @@ try:
     @router.post('/api/admin/ai-v6/full-sync-step')
     def admin_ai_v6_full_sync_step(authorization: str|None = Header(default=None), max_round: int|None = None, chunk_size: int = 25):
         require_admin(authorization)
-        # DB에 이미 저장된 1회~최신회 데이터를 즉시 재분석한다.
-        # 외부 복권 서버 통신은 하지 않아 버튼이 멈추지 않는다.
-        cache = _ai_v13_refresh_cache(force=True)
-        payload = _ai_v13_admin_payload(cache)
-        payload.update({'completed': bool(payload['is_full_history']), 'cache': dict(payload), 'saved': 0})
-        return payload
+        # 부분 DB(예: 1131~1232회만 존재)도 1회차부터 순차 복구한다.
+        # 한 요청에서는 제한된 개수만 처리하여 Render 요청 제한과 화면 멈춤을 피한다.
+        result = _ai_v13_repair_missing_history(max_round=max_round, chunk_size=chunk_size)
+        payload = _ai_v13_admin_payload(result.get('cache') or {})
+        return {
+            'ok': bool(result.get('ok', True)),
+            'completed': bool(result.get('completed') or payload['is_full_history']),
+            'message': result.get('message') or payload['analysis_confirm'],
+            'saved': int(result.get('saved') or 0),
+            'requested': int(result.get('requested') or 0),
+            'remaining': int(result.get('remaining') or payload['missing_rounds_count']),
+            'cache': payload,
+        }
 
     @router.post('/api/admin/ai-v6/full-sync')
     def admin_ai_v6_full_sync(authorization: str|None = Header(default=None), max_round: int|None = None):
         require_admin(authorization)
-        cache = _ai_v13_refresh_cache(force=True)
-        payload = _ai_v13_admin_payload(cache)
-        return {'ok': True, 'completed': bool(payload['is_full_history']), 'message': payload['analysis_confirm'], 'cache': payload}
+        result = _ai_v13_repair_missing_history(max_round=max_round, chunk_size=100)
+        payload = _ai_v13_admin_payload(result.get('cache') or {})
+        return {'ok': True, 'completed': bool(result.get('completed') or payload['is_full_history']), 'message': result.get('message') or payload['analysis_confirm'], 'saved': int(result.get('saved') or 0), 'remaining': int(result.get('remaining') or payload['missing_rounds_count']), 'cache': payload}
 
     @router.post('/api/ai-engine/v6-sync-full')
     def ai_engine_v6_sync_full(authorization: str|None = Header(default=None), max_round: int|None = None):
