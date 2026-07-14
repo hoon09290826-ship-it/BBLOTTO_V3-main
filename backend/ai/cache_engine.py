@@ -16,7 +16,7 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-CACHE_ENGINE_VERSION = "BBLOTTO_AI_CACHE_V13_04"
+CACHE_ENGINE_VERSION = "BBLOTTO_AI_CACHE_V13_05_CONNECTION_FIX"
 _CACHE_KEY = "full_history_statistics"
 _LOCK = threading.RLock()
 _MEMORY: Dict[str, Any] = {}
@@ -189,7 +189,7 @@ def _normalize_legacy_official_payload(data: Any, round_no: int) -> Optional[Dic
         return None
 
 
-def _official_fetch(round_no: int, timeout: int = 8) -> Tuple[Optional[Dict[str, Any]], str]:
+def _official_fetch(round_no: int, timeout: float = 2.5) -> Tuple[Optional[Dict[str, Any]], str]:
     """Fetch one draw from the current official endpoint with legacy fallback.
 
     Returns ``(draw, error)`` so the administrator screen can display the real
@@ -214,11 +214,13 @@ def _official_fetch(round_no: int, timeout: int = 8) -> Tuple[Optional[Dict[str,
         "Referer": "https://www.dhlottery.co.kr/lt645/result",
         "Cache-Control": "no-cache",
     }
+    # Railway의 upstream 제한시간을 넘기지 않도록 각 공식 주소는 1회만 짧게 시도합니다.
+    # 한 주소가 막혀도 다음 주소로 즉시 넘어가며, 전체 요청은 보통 수 초 안에 종료됩니다.
     for url, normalizer in endpoints:
-        for attempt in range(1, 4):
+        for attempt in range(1, 2):
             try:
                 request = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(request, timeout=max(3, int(timeout))) as response:
+                with urllib.request.urlopen(request, timeout=max(1.5, float(timeout))) as response:
                     body = response.read().decode("utf-8", errors="replace")
                 data = json.loads(body)
                 normalized = normalizer(data, r)
@@ -239,8 +241,9 @@ def _official_fetch(round_no: int, timeout: int = 8) -> Tuple[Optional[Dict[str,
                 break
             except Exception as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
-            if attempt < 3:
-                time.sleep(0.35 * attempt)
+            # 재시도 대기로 Railway 요청이 장시간 멈추는 것을 방지합니다.
+            if attempt < 1:
+                time.sleep(0.1)
     unique_errors = list(dict.fromkeys(str(item)[:120] for item in errors if item))
     return None, "; ".join(unique_errors[-4:]) or "공식 당첨번호 응답 없음"
 
@@ -291,7 +294,7 @@ def repair_missing_history(max_round: Optional[int] = None, chunk_size: int = 25
                 "error": "draws 테이블에 회차 데이터가 없습니다."}
     existing = set(rounds)
     missing = [round_no for round_no in range(1, latest + 1) if round_no not in existing]
-    batch = missing[:max(1, min(int(chunk_size or 25), 50))]
+    batch = missing[:max(1, min(int(chunk_size or 4), 4))]
     fetched: List[Dict[str, Any]] = []
     failures: List[Tuple[int, str]] = []
     if batch:
