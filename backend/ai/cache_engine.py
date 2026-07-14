@@ -1,0 +1,390 @@
+from __future__ import annotations
+
+import datetime as dt
+import json
+import math
+import os
+import sqlite3
+import threading
+import time
+import urllib.parse
+from collections import Counter
+from itertools import combinations
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+CACHE_ENGINE_VERSION = "BBLOTTO_AI_CACHE_V13_01"
+_CACHE_KEY = "full_history_statistics"
+_LOCK = threading.RLock()
+_MEMORY: Dict[str, Any] = {}
+
+
+def _normalize_database_url(url: str) -> str:
+    value = (url or "").strip()
+    if not value or value.startswith("${{"):
+        return ""
+    if value.startswith("postgres://"):
+        return "postgresql://" + value[len("postgres://"):]
+    return value
+
+
+def _database_url() -> str:
+    direct = os.getenv("DATABASE_URL", "") or os.getenv("POSTGRES_URL", "")
+    if direct:
+        return _normalize_database_url(direct)
+    host = os.getenv("PGHOST", "").strip()
+    user = os.getenv("PGUSER", "").strip() or os.getenv("POSTGRES_USER", "").strip()
+    password = os.getenv("PGPASSWORD", "").strip() or os.getenv("POSTGRES_PASSWORD", "").strip()
+    name = os.getenv("PGDATABASE", "").strip() or os.getenv("POSTGRES_DB", "").strip()
+    port = os.getenv("PGPORT", "5432").strip() or "5432"
+    if host and user and name:
+        return f"postgresql://{urllib.parse.quote(user)}:{urllib.parse.quote(password)}@{host}:{port}/{name}"
+    return ""
+
+
+def _sqlite_path() -> Path:
+    directory = os.getenv("BBLOTTO_DB_DIR", "").strip()
+    if directory:
+        return Path(directory).expanduser().resolve() / "bblotto_v34.db"
+    return (Path(__file__).resolve().parents[2] / "database" / "bblotto_v34.db").resolve()
+
+
+def _parse_numbers(value: Any) -> List[int]:
+    if isinstance(value, (list, tuple, set)):
+        raw = value
+    else:
+        raw = str(value or "").replace("[", " ").replace("]", " ").replace(",", " ").split()
+    result: List[int] = []
+    for item in raw:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= number <= 45 and number not in result:
+            result.append(number)
+    return sorted(result)
+
+
+def _source_signature() -> Tuple[str, int, int, int]:
+    url = _database_url()
+    if url:
+        try:
+            import psycopg2
+            with psycopg2.connect(url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COALESCE(MIN(round_no),0), COALESCE(MAX(round_no),0), COUNT(*) FROM draws")
+                    first_round, latest_round, count = cur.fetchone()
+            return "postgresql", int(first_round), int(latest_round), int(count)
+        except Exception:
+            return "postgresql", 0, 0, 0
+    path = _sqlite_path()
+    if not path.exists():
+        return "sqlite", 0, 0, 0
+    try:
+        with sqlite3.connect(str(path), timeout=15) as conn:
+            row = conn.execute("SELECT COALESCE(MIN(round_no),0), COALESCE(MAX(round_no),0), COUNT(*) FROM draws").fetchone()
+        return "sqlite", int(row[0]), int(row[1]), int(row[2])
+    except sqlite3.DatabaseError:
+        return "sqlite", 0, 0, 0
+
+
+def _fetch_draws(after_round: int = 0) -> List[Dict[str, Any]]:
+    url = _database_url()
+    rows: Sequence[Sequence[Any]]
+    if url:
+        import psycopg2
+        with psycopg2.connect(url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT round_no, draw_date, numbers, bonus FROM draws WHERE round_no > %s ORDER BY round_no",
+                    (int(after_round),),
+                )
+                rows = cur.fetchall()
+    else:
+        path = _sqlite_path()
+        if not path.exists():
+            return []
+        with sqlite3.connect(str(path), timeout=15) as conn:
+            rows = conn.execute(
+                "SELECT round_no, draw_date, numbers, bonus FROM draws WHERE round_no > ? ORDER BY round_no",
+                (int(after_round),),
+            ).fetchall()
+    draws: List[Dict[str, Any]] = []
+    for round_no, draw_date, numbers, bonus in rows:
+        parsed = _parse_numbers(numbers)
+        if len(parsed) == 6:
+            draws.append({
+                "round": int(round_no),
+                "date": str(draw_date or ""),
+                "numbers": parsed,
+                "bonus": int(bonus or 0),
+            })
+    return draws
+
+
+def _ensure_cache_table() -> None:
+    url = _database_url()
+    if url:
+        import psycopg2
+        with psycopg2.connect(url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS ai_analysis_cache (
+                        cache_key TEXT PRIMARY KEY,
+                        engine_version TEXT NOT NULL,
+                        latest_round INTEGER NOT NULL DEFAULT 0,
+                        draw_count INTEGER NOT NULL DEFAULT 0,
+                        payload TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """
+                )
+        return
+    path = _sqlite_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(path), timeout=15) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_analysis_cache (
+                cache_key TEXT PRIMARY KEY,
+                engine_version TEXT NOT NULL,
+                latest_round INTEGER NOT NULL DEFAULT 0,
+                draw_count INTEGER NOT NULL DEFAULT 0,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+
+
+def _load_persisted() -> Optional[Dict[str, Any]]:
+    _ensure_cache_table()
+    url = _database_url()
+    row: Optional[Sequence[Any]]
+    if url:
+        import psycopg2
+        with psycopg2.connect(url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT payload FROM ai_analysis_cache WHERE cache_key=%s", (_CACHE_KEY,))
+                row = cur.fetchone()
+    else:
+        with sqlite3.connect(str(_sqlite_path()), timeout=15) as conn:
+            row = conn.execute("SELECT payload FROM ai_analysis_cache WHERE cache_key=?", (_CACHE_KEY,)).fetchone()
+    if not row:
+        return None
+    try:
+        payload = json.loads(row[0])
+        return payload if isinstance(payload, dict) else None
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _save_persisted(payload: Dict[str, Any]) -> None:
+    _ensure_cache_table()
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    latest = int(payload.get("latest_round", 0))
+    count = int(payload.get("draw_count", 0))
+    url = _database_url()
+    if url:
+        import psycopg2
+        with psycopg2.connect(url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO ai_analysis_cache(cache_key,engine_version,latest_round,draw_count,payload,updated_at)
+                    VALUES(%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT(cache_key) DO UPDATE SET
+                      engine_version=EXCLUDED.engine_version,
+                      latest_round=EXCLUDED.latest_round,
+                      draw_count=EXCLUDED.draw_count,
+                      payload=EXCLUDED.payload,
+                      updated_at=EXCLUDED.updated_at
+                    """,
+                    (_CACHE_KEY, CACHE_ENGINE_VERSION, latest, count, encoded, now),
+                )
+        return
+    with sqlite3.connect(str(_sqlite_path()), timeout=15) as conn:
+        conn.execute(
+            """
+            INSERT INTO ai_analysis_cache(cache_key,engine_version,latest_round,draw_count,payload,updated_at)
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(cache_key) DO UPDATE SET
+              engine_version=excluded.engine_version,
+              latest_round=excluded.latest_round,
+              draw_count=excluded.draw_count,
+              payload=excluded.payload,
+              updated_at=excluded.updated_at
+            """,
+            (_CACHE_KEY, CACHE_ENGINE_VERSION, latest, count, encoded, now),
+        )
+
+
+def _ac(numbers: Sequence[int]) -> int:
+    return len({b - a for a, b in combinations(sorted(numbers), 2)}) - 5
+
+
+def _signature(numbers: Sequence[int]) -> Dict[str, Any]:
+    nums = sorted(numbers)
+    odd = sum(n % 2 for n in nums)
+    zones = [sum(n <= 15 for n in nums), sum(16 <= n <= 30 for n in nums), sum(n >= 31 for n in nums)]
+    return {
+        "sum": sum(nums), "odd": odd, "even": 6 - odd, "zones": zones, "ac": _ac(nums),
+        "consecutive": sum(1 for n in nums if n + 1 in set(nums)),
+        "end_types": len({n % 10 for n in nums}),
+        "max_end_dup": max(Counter(n % 10 for n in nums).values(), default=0),
+        "spread": nums[-1] - nums[0],
+    }
+
+
+def _norm(values: Dict[int, float]) -> Dict[int, float]:
+    lo, hi = min(values.values(), default=0.0), max(values.values(), default=0.0)
+    if math.isclose(lo, hi):
+        return {n: 0.5 for n in range(1, 46)}
+    return {n: (values.get(n, lo) - lo) / (hi - lo) for n in range(1, 46)}
+
+
+def _materialize(draws: List[Dict[str, Any]], started: float, update_mode: str, added_count: int) -> Dict[str, Any]:
+    latest_round = draws[-1]["round"] if draws else 0
+    windows = (10, 30, 50, 100, 300)
+    frequencies: Dict[int, Counter] = {
+        window: Counter(n for draw in draws[-window:] for n in draw["numbers"])
+        for window in windows
+    }
+    all_frequency = Counter(n for draw in draws for n in draw["numbers"])
+    last_seen = {n: -1 for n in range(1, 46)}
+    for index, draw in enumerate(draws):
+        for number in draw["numbers"]:
+            last_seen[number] = index
+    gaps = {n: len(draws) if last_seen[n] < 0 else len(draws) - 1 - last_seen[n] for n in range(1, 46)}
+
+    pair_all: Counter = Counter()
+    for draw in draws:
+        pair_all.update(combinations(draw["numbers"], 2))
+    recent = draws[-100:]
+    pair_recent: Counter = Counter()
+    triple_recent: Counter = Counter()
+    for draw in recent:
+        pair_recent.update(combinations(draw["numbers"], 2))
+        triple_recent.update(combinations(draw["numbers"], 3))
+
+    n10 = _norm({n: frequencies[10][n] / 10 for n in range(1, 46)})
+    n30 = _norm({n: frequencies[30][n] / 30 for n in range(1, 46)})
+    n100 = _norm({n: frequencies[100][n] / 100 for n in range(1, 46)})
+    n300 = _norm({n: frequencies[300][n] / max(1, min(300, len(draws))) for n in range(1, 46)})
+    nall = _norm({n: all_frequency[n] / max(1, len(draws)) for n in range(1, 46)})
+    ngap = _norm({n: float(gaps[n]) for n in range(1, 46)})
+    score_map: Dict[int, float] = {}
+    momentum: Dict[int, float] = {}
+    for number in range(1, 46):
+        change = (n10[number] - n100[number]) * 0.65 + (n30[number] - n300[number]) * 0.35
+        momentum[number] = change
+        score_map[number] = (
+            0.22 * n10[number] + 0.20 * n30[number] + 0.18 * n100[number]
+            + 0.10 * n300[number] + 0.08 * nall[number] + 0.14 * ngap[number]
+            + 0.08 * max(0.0, min(1.0, 0.5 + change))
+        )
+
+    signatures = [_signature(draw["numbers"]) for draw in recent]
+    sums = [item["sum"] for item in signatures]
+    sum_mean = sum(sums) / len(sums) if sums else 138.0
+    sum_sd = math.sqrt(sum((value - sum_mean) ** 2 for value in sums) / len(sums)) if sums else 25.0
+    def average(key: str, default: float) -> float:
+        return sum(float(item[key]) for item in signatures) / len(signatures) if signatures else default
+
+    ranked = sorted(range(1, 46), key=lambda n: (-score_map[n], n))
+    overdue = sorted(range(1, 46), key=lambda n: (-gaps[n], n))
+    cold = sorted(range(1, 46), key=lambda n: (frequencies[30][n], frequencies[100][n], n))
+    first_round = draws[0]["round"] if draws else 0
+    return {
+        "engine_version": CACHE_ENGINE_VERSION,
+        "recommendation_engine_version": "",
+        "cache_storage": "database+persistent-memory",
+        "cache_update_mode": update_mode,
+        "incremental_added_rounds": added_count,
+        "analysis_confirm": f"1회차부터 {latest_round}회차까지 {len(draws)}개 회차 분석",
+        "draw_count": len(draws), "actual_count": len(draws), "expected_count": latest_round,
+        "round_range": [first_round, latest_round], "latest_round": latest_round,
+        "target_round": latest_round + 1 if latest_round else 1,
+        "is_full_history": bool(draws and first_round == 1 and len(draws) == latest_round),
+        "missing_rounds_count": max(0, latest_round - len(draws)), "missing_rounds_sample": [],
+        "frequency10": {str(n): frequencies[10][n] for n in range(1, 46)},
+        "frequency30": {str(n): frequencies[30][n] for n in range(1, 46)},
+        "frequency50": {str(n): frequencies[50][n] for n in range(1, 46)},
+        "frequency100": {str(n): frequencies[100][n] for n in range(1, 46)},
+        "frequency300": {str(n): frequencies[300][n] for n in range(1, 46)},
+        "frequency_all": {str(n): all_frequency[n] for n in range(1, 46)},
+        "gap": {str(n): gaps[n] for n in range(1, 46)},
+        "score_map": {str(n): round(score_map[n] * 100, 4) for n in range(1, 46)},
+        "momentum": {str(n): round(momentum[n], 5) for n in range(1, 46)},
+        "hot": ranked[:15], "cold": cold[:15], "overdue": overdue[:15],
+        "pair_top": [[list(pair), count] for pair, count in pair_all.most_common(100)],
+        "pair_recent_top": [[list(pair), count] for pair, count in pair_recent.most_common(100)],
+        "triple_recent_top": [[list(triple), count] for triple, count in triple_recent.most_common(50)],
+        "pair_counts": {f"{a}-{b}": count for (a, b), count in pair_recent.items()},
+        "triple_counts": {"-".join(map(str, triple)): count for triple, count in triple_recent.items()},
+        "pattern": {
+            "sum_mean": round(sum_mean, 2), "sum_sd": round(sum_sd, 2),
+            "odd_mean": round(average("odd", 3), 2), "ac_mean": round(average("ac", 7), 2),
+            "consecutive_mean": round(average("consecutive", 0.8), 2),
+        },
+        "latest_numbers": [draw["numbers"] for draw in draws[-12:]],
+        # 다음 증분 갱신 때 DB 전체를 재조회하지 않기 위한 최소 원본 상태입니다.
+        "_draw_history": draws,
+        "built_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "build_ms": round((time.perf_counter() - started) * 1000, 2),
+    }
+
+
+def _refresh(force: bool = False) -> Dict[str, Any]:
+    started = time.perf_counter()
+    source_engine, first_round, latest_round, count = _source_signature()
+    persisted = None if force else _load_persisted()
+    history = list((persisted or {}).get("_draw_history") or [])
+    cached_latest = int((persisted or {}).get("latest_round", 0))
+    cached_count = int((persisted or {}).get("draw_count", 0))
+    append_only = bool(
+        persisted and history and first_round == 1 and cached_count == len(history)
+        and count >= cached_count and latest_round >= cached_latest
+        and (count - cached_count) == (latest_round - cached_latest)
+    )
+    if append_only:
+        added = _fetch_draws(cached_latest)
+        if added:
+            history.extend(added)
+            mode = "incremental"
+        else:
+            payload = dict(persisted)
+            payload["cache_update_mode"] = "cache-hit"
+            payload["incremental_added_rounds"] = 0
+            payload["build_ms"] = round((time.perf_counter() - started) * 1000, 2)
+            payload["source_engine"] = source_engine
+            return payload
+    else:
+        history = _fetch_draws(0)
+        added = history
+        mode = "full-rebuild"
+    payload = _materialize(history, started, mode, len(added))
+    payload["source_engine"] = source_engine
+    _save_persisted(payload)
+    return payload
+
+
+def get_analysis_cache(
+    force: bool = False,
+    target_round: Optional[int] = None,
+    recommendation_engine_version: str = "",
+) -> Dict[str, Any]:
+    signature = _source_signature()
+    with _LOCK:
+        if force or _MEMORY.get("signature") != signature:
+            payload = _refresh(force=force)
+            _MEMORY.clear()
+            _MEMORY.update({"signature": signature, "payload": payload})
+        result = dict(_MEMORY.get("payload") or {})
+    result.pop("_draw_history", None)
+    result["recommendation_engine_version"] = recommendation_engine_version
+    if target_round:
+        result["target_round"] = int(target_round)
+    return result

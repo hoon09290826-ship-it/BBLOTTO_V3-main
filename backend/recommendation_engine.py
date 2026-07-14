@@ -16,6 +16,8 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from .ai.cache_engine import get_analysis_cache as _persistent_analysis_cache
+
 ENGINE_VERSION = "BBLOTTO_AI_FULL_HISTORY_FAST_V12"
 _CACHE_LOCK = threading.RLock()
 _MEMORY_CACHE: Dict[str, Any] = {}
@@ -230,15 +232,12 @@ def _cache_key() -> Tuple[str, int, int]:
 
 
 def get_analysis_cache(force: bool = False, target_round: Optional[int] = None) -> Dict[str, Any]:
-    key = _cache_key()
-    with _CACHE_LOCK:
-        if force or _MEMORY_CACHE.get("key") != key:
-            _MEMORY_CACHE.clear()
-            _MEMORY_CACHE.update({"key": key, "data": _build_cache()})
-        data = dict(_MEMORY_CACHE.get("data") or {})
-    if target_round:
-        data["target_round"] = int(target_round)
-    return data
+    """Return the persistent full-history cache managed by AI PATCH 01."""
+    return _persistent_analysis_cache(
+        force=force,
+        target_round=target_round,
+        recommendation_engine_version=ENGINE_VERSION,
+    )
 
 
 def latest_stats(limit: int = 0) -> Dict[str, Any]:
