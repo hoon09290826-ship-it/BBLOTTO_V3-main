@@ -18,9 +18,7 @@ _FEATURE_PARTS = (
     ("70_ai_engine.py", "ai-engine"),
     ("80_dashboards_operations.py", "dashboards-operations"),
     ("90_release_rc3.py", "release-rc3"),
-    ("95_engine_upgrades.py", "engine-upgrades"),
-    ("97_rc7_exports.py", "rc7-exports"),
-    ("99_final_overrides.py", "final-overrides"),
+    ("95_engine_runtime.py", "engine-runtime"),
 )
 
 _parts_dir = Path(__file__).with_name("app_parts")
