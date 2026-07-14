@@ -21,7 +21,8 @@ def login(req:LoginReq, request:Request):
         if password_needs_rehash(admin['password_hash']):
             c.execute('UPDATE admins SET password_hash=? WHERE id=?', (hash_password(req.password), admin['id']))
         # 만료 세션과 오래된 중복 세션을 정리합니다.
-        c.execute("DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now','localtime')")
+        # SQLite와 PostgreSQL에서 동일하게 동작하도록 현재 시각을 파라미터로 전달합니다.
+        c.execute('DELETE FROM sessions WHERE expires_at <= ?', (now(),))
         old_sessions = c.execute('SELECT token FROM sessions WHERE admin_id=? ORDER BY created_at DESC', (admin['id'],)).fetchall()
         for old in old_sessions[2:]:
             c.execute('DELETE FROM sessions WHERE token=?', (old['token'],))
