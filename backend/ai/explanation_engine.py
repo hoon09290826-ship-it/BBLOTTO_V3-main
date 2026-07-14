@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 from .cache_engine import get_analysis_cache
 
-EXPLANATION_ENGINE_VERSION = "BBLOTTO_AI_EXPLANATION_V13_04_ACTUAL_COMBO"
+EXPLANATION_ENGINE_VERSION = "BBLOTTO_AI_EXPLANATION_V13_03"
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -237,94 +237,66 @@ def build_round_analysis(
     excluded: Any,
     details: Sequence[Mapping[str, Any]],
 ) -> str:
-    """Create a factual 3-5 line Korean analysis from AI-01/AI-02 results."""
+    """Explain the actual generated combinations and their real selection evidence."""
     valid = _valid_details(details)
     if not valid:
-        return "추천 조합의 분석 근거가 없어 설명을 만들 수 없습니다. 번호를 다시 생성해 주세요."
+        return "추천 조합의 실제 분석 데이터가 없어 설명을 만들 수 없습니다. 번호를 다시 생성해 주세요."
 
-    try:
-        cache = get_analysis_cache(False, target_round=_as_int(round_no))
-    except Exception:
-        cache = dict(stats or {})
-    if not cache:
-        cache = dict(stats or {})
+    actual_round = _as_int(round_no)
+    combos = [list(d["numbers"]) for d in valid]
+    use_counts = Counter(n for combo in combos for n in combo)
+    evidence = _evidence_map(valid)
+
+    # 실제 사용 횟수가 높은 번호를 우선 설명한다. 동률이면 선택점수, 번호순으로 정렬한다.
+    ranked_numbers = sorted(
+        use_counts,
+        key=lambda n: (
+            -use_counts[n],
+            -_as_float(evidence.get(n, {}).get("selection_score")),
+            n,
+        ),
+    )
+    core_numbers = ranked_numbers[: min(4, len(ranked_numbers))]
+    core_parts: List[str] = []
+    for number in core_numbers:
+        item = evidence.get(number, {})
+        role = str(item.get("role") or "균형수")
+        reason = str(item.get("reason") or "단기·중기·전체 흐름을 함께 반영한 후보")
+        core_parts.append(f"{number}번({role}, {reason}, {use_counts[number]}개 조합 사용)")
+
+    # 실제 최고점 조합을 고르고 해당 조합의 상세 수치를 그대로 설명한다.
+    best = max(valid, key=lambda d: _as_float(d.get("score") or d.get("ai_score")))
+    best_combo = list(best["numbers"])
+    odd = _as_int(best.get("odd"), sum(n % 2 for n in best_combo))
+    even = _as_int(best.get("even"), 6 - odd)
+    zones = best.get("zones") or [
+        sum(n <= 15 for n in best_combo),
+        sum(16 <= n <= 30 for n in best_combo),
+        sum(n >= 31 for n in best_combo),
+    ]
+    combo_sum = _as_int(best.get("sum"), sum(best_combo))
+    ac = _as_int(best.get("ac"))
+    pair_strength = _as_float(best.get("pair_strength"))
+    combo_label = "-".join(map(str, best_combo))
+
+    # 최고점 조합 안의 각 번호가 왜 들어갔는지 실제 evidence로 연결한다.
+    best_reason_parts: List[str] = []
+    for number in best_combo:
+        item = evidence.get(number, {})
+        reason = str(item.get("reason") or "전체 이력 점수와 조합 균형을 반영")
+        best_reason_parts.append(f"{number}번은 {reason}")
+    # 한 줄이 지나치게 길어지지 않도록 핵심 3개만 직접 설명한다.
+    best_reason_text = "; ".join(best_reason_parts[:3])
 
     portfolio = _portfolio_metrics(valid)
-    evidence = _evidence_map(valid)
-    roles = _role_metrics(evidence, portfolio)
-    actual_round = _as_int(round_no, _as_int(cache.get("latest_round")) + 1)
-    seed = f"{actual_round}|{mode}|{portfolio['combos']}|{cache.get('latest_round')}|{roles}"
-
     lines = [
-        _trend_line(actual_round, cache, seed),
-        _selection_line(roles, cache, seed),
-        _balance_line(portfolio, seed),
-        _diversity_line(portfolio, valid, seed),
+        f"{actual_round}회차 실제 추천번호에서 핵심 축은 " + ", ".join(core_parts) + "입니다.",
+        f"최고점 조합 [{combo_label}]은 {best_reason_text}라는 근거로 구성됐습니다.",
+        f"이 조합은 홀짝 {odd}:{even}, 구간 {zones[0]}-{zones[1]}-{zones[2]}, 합계 {combo_sum}, AC {ac}" + (f", 동반출현 점수 {pair_strength:.1f}" if pair_strength else "") + " 조건을 충족했습니다.",
+        f"전체 {len(combos)}개 조합에는 {portfolio['unique_numbers']}개 번호를 분산 사용했고, 같은 번호는 최대 {portfolio['max_number_use']}개 조합, 조합 간 중복은 최대 {portfolio['max_overlap']}개로 제한했습니다.",
     ]
     condition = _condition_line(fixed, excluded)
     if condition:
         lines.append(condition)
-    return "\n".join(line for line in lines[:5] if line)
-
-
-def _evidence_reason(item: Mapping[str, Any]) -> str:
-    role = str(item.get("role") or "균형수")
-    number = _as_int(item.get("number"), 0)
-    f10 = _as_int(item.get("freq10"), 0)
-    f30 = _as_int(item.get("freq30"), 0)
-    gap = _as_int(item.get("gap"), 0)
-    if role == "강세수":
-        return f"{number}번은 최근 10회 {f10}회·30회 {f30}회 출현한 강세수"
-    if role == "반등수":
-        return f"{number}번은 최근 {gap}회 미출현한 반등 후보"
-    return f"{number}번은 최근 10회 {f10}회·30회 {f30}회 흐름이 안정적인 균형수"
-
-
-def _combo_reason(detail: Mapping[str, Any], index: int) -> str:
-    combo = _numbers(detail)
-    label = "-".join(str(n) for n in combo)
-    evidence = [e for e in (detail.get("number_evidence") or []) if isinstance(e, Mapping)]
-    evidence = sorted(evidence, key=lambda e: _as_float(e.get("selection_score")), reverse=True)
-    selected = evidence[:2]
-    evidence_text = ", ".join(_evidence_reason(e) for e in selected)
-    odd = _as_int(detail.get("odd"), sum(n % 2 for n in combo))
-    even = _as_int(detail.get("even"), 6-odd)
-    zones = detail.get("zones") or [sum(n<=15 for n in combo), sum(16<=n<=30 for n in combo), sum(n>=31 for n in combo)]
-    total = _as_int(detail.get("sum"), sum(combo))
-    ac = _as_int(detail.get("ac"), 0)
-    pair = _as_float(detail.get("pair_strength"), 0.0)
-    archetype = str(detail.get("type") or detail.get("strategy") or "균형형")
-    pair_text = f", 동반출현 점수 {pair:.1f}" if pair > 0 else ""
-    return (
-        f"{index}조합 [{label}]은 {evidence_text}를 중심으로 묶은 {archetype}입니다. "
-        f"홀짝 {odd}:{even}·구간 {zones[0]}-{zones[1]}-{zones[2]}·합계 {total}·AC {ac}{pair_text} 조건으로 최종 선별했습니다."
-    )
-
-
-def build_recommendation_analysis(round_no: int, details: Sequence[Mapping[str, Any]]) -> str:
-    """Explain the actual generated numbers and combinations, not a generic round trend."""
-    valid = _valid_details(details)
-    if not valid:
-        return "추천번호별 선별 근거가 없어 설명을 만들 수 없습니다. 번호를 다시 생성해 주세요."
-
-    usage = Counter(n for d in valid for n in d["numbers"])
-    evidence = _evidence_map(valid)
-    core = sorted(usage, key=lambda n: (-usage[n], -_as_float(evidence.get(n, {}).get("selection_score")), n))[:4]
-    core_parts = []
-    for n in core:
-        ev = dict(evidence.get(n, {}))
-        ev["number"] = n
-        core_parts.append(f"{_evidence_reason(ev)}로 {usage[n]}개 조합에 사용")
-    lines = [f"{_as_int(round_no)}회차 실제 추천번호의 핵심 축은 " + "; ".join(core_parts) + "했습니다."]
-
-    ranked = sorted(valid, key=lambda d: _as_float(d.get("score") or d.get("ai_score") or d.get("vip_score")), reverse=True)
-    for idx, detail in enumerate(ranked[:3], start=1):
-        original_index = valid.index(detail) + 1
-        lines.append(_combo_reason(detail, original_index))
-
-    portfolio = _portfolio_metrics(valid)
-    lines.append(
-        f"전체 {len(valid)}개 조합은 {portfolio['unique_numbers']}개 번호를 사용했고, 조합 간 최대 중복을 {portfolio['max_overlap']}개로 제한했으며 "
-        f"합계는 {portfolio['sum_min']}~{portfolio['sum_max']} 범위로 분산했습니다."
-    )
     return "\n".join(lines[:5])
+
