@@ -96,34 +96,47 @@ def _format_range_labels(zone_totals: Sequence[int]) -> Tuple[str, str]:
 
 
 def _trend_line(round_no: int, core: Sequence[int], ev: Dict[int, Dict[str, Any]], seed: str) -> str:
+    """Describe the round trend first; mention individual numbers only as evidence."""
     hot = [n for n in core if str(ev.get(n, {}).get("role") or "") == "강세수"]
     rebound = [n for n in core if str(ev.get(n, {}).get("role") or "") == "반등수"]
-    focus = ", ".join(f"{n}번" for n in core[:4])
+
+    zone_scores = [0.0, 0.0, 0.0]
+    zone_labels = ("1~15번", "16~30번", "31~45번")
+    for number, item in ev.items():
+        idx = 0 if number <= 15 else 1 if number <= 30 else 2
+        zone_scores[idx] += (
+            _int(item.get("freq10")) * 4.0
+            + _int(item.get("freq30")) * 1.5
+            + _int(item.get("freq100")) * 0.25
+            + float(item.get("selection_score") or 0.0) * 0.05
+        )
+    order = sorted(range(3), key=lambda idx: zone_scores[idx], reverse=True)
+    lead_zone = zone_labels[order[0]]
+    support_zone = zone_labels[order[1]]
 
     if hot and rebound:
-        hot_text = ", ".join(f"{n}번" for n in hot[:3])
-        rebound_text = ", ".join(f"{n}번" for n in rebound[:3])
         return _choice(seed + "trend-mix", [
-            f"최근 흐름이 이어진 {hot_text}과 출현 공백이 누적된 {rebound_text}을 함께 반영해 {round_no}회차 추천의 중심축을 구성했습니다.",
-            f"이번 {round_no}회차는 단기 출현 강도가 높은 {hot_text}에 반등 후보 {rebound_text}을 섞어 한쪽 흐름에만 치우치지 않도록 설계했습니다.",
-            f"최근 강세 구간의 {hot_text}과 미출현 간격이 길어진 {rebound_text}이 동시에 포착되어 두 흐름을 조합 전반에 분산했습니다.",
+            f"이번 {round_no}회차는 최근 10·30회에서 흐름이 유지된 번호대와 장기 미출현 반등 후보를 함께 반영한 혼합형 분석이 우세했습니다.",
+            f"최근 단기 강세와 누적 미출현 흐름이 동시에 나타나 이번 {round_no}회차는 강세수 중심에 반등 후보를 분산하는 방식으로 구성했습니다.",
+            f"이번 회차 데이터에서는 최근 출현 강도와 공백 누적 신호가 함께 포착돼 한쪽 흐름에 치우치지 않는 혼합 구성이 적합하게 나타났습니다.",
         ])
     if hot:
-        hot_text = ", ".join(f"{n}번" for n in hot[:4])
         return _choice(seed + "trend-hot", [
-            f"최근 10·30회 출현 흐름에서 상대적으로 강했던 {hot_text}을 {round_no}회차 추천의 중심 번호로 반영했습니다.",
-            f"이번 회차는 단기와 중기 빈도가 함께 유지된 {hot_text}의 흐름을 우선 반영하되 반복 비중은 조합별로 나눴습니다.",
-            f"최근 출현 강도가 안정적으로 이어진 {hot_text}이 높은 선택 점수를 받아 이번 추천의 주축으로 포함됐습니다.",
+            f"이번 {round_no}회차는 최근 10·30회에서 출현 강도가 이어진 {lead_zone} 흐름이 상대적으로 우세해 해당 구간을 중심으로 반영했습니다.",
+            f"최근 단기·중기 빈도를 비교한 결과 {lead_zone}와 {support_zone}의 흐름이 안정적으로 유지돼 이번 추천의 중심 구간으로 활용했습니다.",
+            f"이번 회차는 최근 출현 빈도와 선택 점수가 함께 높아진 번호대를 우선 반영하되 특정 번호의 과도한 반복은 줄였습니다.",
         ])
     if rebound:
-        rebound_text = ", ".join(f"{n}번" for n in rebound[:4])
         return _choice(seed + "trend-rebound", [
-            f"최근 출현 공백이 길어진 {rebound_text}의 반등 신호가 상대적으로 높게 계산되어 {round_no}회차 후보에 분산 반영했습니다.",
-            f"이번 회차는 미출현 간격이 누적된 {rebound_text}을 보완 후보로 활용해 최근 강세수만 반복되는 구성을 피했습니다.",
-            f"장기 공백과 누적 출현 기록을 함께 비교한 결과 {rebound_text}이 반등 후보로 선별되어 일부 조합의 변동성을 보강했습니다.",
+            f"이번 {round_no}회차는 최근 미출현 간격이 누적된 번호들의 반등 신호가 상대적으로 높아 일부 조합에 보완 후보로 반영했습니다.",
+            f"최근 강세수만 반복하기보다 장기 공백이 길어진 번호대를 함께 살펴 이번 회차의 변동 가능성을 조합에 나눠 담았습니다.",
+            f"전체 이력과 최근 흐름을 비교한 결과 미출현 공백이 누적된 후보군의 반등 가능성이 높아져 보완 축으로 활용했습니다.",
         ])
-    return f"전체 이력과 최근 10·30·100회 가중치를 함께 비교한 결과 {focus}이 {round_no}회차 추천에서 높은 선택 점수를 받았습니다."
-
+    return _choice(seed + "trend-neutral", [
+        f"이번 {round_no}회차는 1회차부터 최신 회차까지의 전체 흐름과 최근 10·30·100회 가중치를 함께 비교해 균형형 후보군을 선별했습니다.",
+        f"전체 누적 통계와 최근 흐름 사이의 편차가 크지 않아 이번 회차는 특정 구간보다 분산과 조합 균형을 우선했습니다.",
+        f"이번 회차는 장기 빈도와 최근 출현 흐름을 함께 반영해 어느 한 번호대에 과도하게 집중되지 않는 후보군을 구성했습니다.",
+    ])
 
 def _balance_line(combos: Sequence[Sequence[int]], seed: str) -> str:
     odds = [sum(n % 2 for n in combo) for combo in combos]
@@ -223,7 +236,7 @@ def build_evidence_analysis(
     if condition:
         lines.append(condition)
 
-    # Contract: always concise and never append a fixed '핵심 전략' sentence.
+    # Keep the result concise: 3 to 5 factual lines only.
     return "\n".join(line for line in lines[:5] if line)
 
 
