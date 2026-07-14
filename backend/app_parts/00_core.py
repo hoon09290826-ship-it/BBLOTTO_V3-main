@@ -5,6 +5,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pathlib import Path
 import sqlite3, json, random, re, itertools, datetime, secrets, hashlib, hmac, io, csv, collections, shutil, os, urllib.request, urllib.parse, time, threading, logging
+from backend.runtime_config import (
+    load_runtime_settings,
+    validate_startup_environment,
+    require_bootstrap_admin_password,
+)
+
+RUNTIME_SETTINGS = load_runtime_settings()
+validate_startup_environment(RUNTIME_SETTINGS)
+APP_ENV = RUNTIME_SETTINGS.app_env
+IS_PRODUCTION = RUNTIME_SETTINGS.is_production
+BBLOTTO_SECRET_KEY = RUNTIME_SETTINGS.secret_key
 
 BASE = Path(__file__).resolve().parents[1]
 
@@ -635,11 +646,14 @@ def init_db():
             c.execute('ALTER TABLE draws ADD COLUMN updated_at TEXT DEFAULT ""')
         c.execute('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)')
         if c.execute('SELECT COUNT(*) FROM admins').fetchone()[0] == 0:
-            init_username = os.getenv('BBLOTTO_ADMIN_USERNAME', 'admin').strip() or 'admin'
-            init_password = os.getenv('BBLOTTO_ADMIN_PASSWORD', '').strip()
+            init_username = RUNTIME_SETTINGS.admin_username
+            init_password = require_bootstrap_admin_password(RUNTIME_SETTINGS)
             if not init_password:
                 init_password = secrets.token_urlsafe(18)
-                print(f'[BBLOTTO][SECURITY] 초기 관리자 비밀번호가 자동 생성되었습니다. Railway/서버 로그에서 확인 후 즉시 변경하세요. username={init_username} password={init_password}')
+                logger.warning(
+                    'development bootstrap administrator password generated username=%s password=%s',
+                    init_username, init_password
+                )
             c.execute('INSERT INTO admins(username,name,password_hash,is_active,created_at) VALUES(?,?,?,?,?)', (init_username,'대표 관리자',hash_password(init_password),1,now()))
         # 기본 당첨번호 DB는 비어 있을 때만 넣는 방식이 아니라, 누락 회차를 항상 보강합니다.
         # 그래서 기존 DB에 20회차만 남아 있어도 최근 100회 통계가 바로 동작합니다.
