@@ -128,9 +128,10 @@ async function syncAiV6FullHistory(){
     let done = false;
     let latest = 0;
     let loops = 0;
-    while(!done && loops < 80){
+    let noProgress = 0;
+    while(!done && loops < 320){
       loops += 1;
-      const d = await api('/api/admin/ai-v6/full-sync-step?chunk_size=25', {method:'POST'});
+      const d = await api('/api/admin/ai-v6/full-sync-step?chunk_size=4', {method:'POST'});
       const c = d.cache || d;
       renderAiV6CacheStatus(c);
       const actual = Number(c.actual_count || c.draw_count || 0);
@@ -140,14 +141,16 @@ async function syncAiV6FullHistory(){
       done = !!(d.completed || c.is_full_history || remaining === 0);
       setText('aiV6CacheBadge', done ? '전체 분석 완료' : `${actual}/${expected} 복구 중`);
       if(!done){
-        const saved = Number(d.saved||0);
-        const failed = Number(d.failed||0);
-        const detail = d.error || d.message || '';
-        setHTML('aiV6CacheStatus', `${document.getElementById('aiV6CacheStatus')?.innerHTML || ''}<br><b>진행:</b> 이번 단계 ${saved}개 저장 / ${remaining}개 남음${failed ? ` / ${failed}개 실패` : ''}${detail ? `<br><b>연결 상태:</b> ${esc(detail)}` : ''}`);
-        if(saved === 0){
-          throw new Error(detail || '동행복권 공식 당첨번호 서버에서 회차 데이터를 받지 못했습니다. 잠시 후 다시 시도해주세요.');
+        setHTML('aiV6CacheStatus', `${document.getElementById('aiV6CacheStatus')?.innerHTML || ''}<br><b>진행:</b> 이번 단계 ${Number(d.saved||0)}개 저장 / ${remaining}개 남음`);
+        if(Number(d.saved||0) > 0){
+          noProgress = 0;
+        }else{
+          noProgress += 1;
+          if(noProgress >= 3){
+            throw new Error(d.message || c.last_refresh_error || '회차 복구가 진행되지 않았습니다. 잠시 후 다시 실행해주세요.');
+          }
         }
-        await new Promise(resolve => setTimeout(resolve, 400));
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
     if(!done) throw new Error('복구 작업이 제한 횟수 안에 완료되지 않았습니다. 버튼을 다시 눌러 이어서 진행해주세요.');
