@@ -1,7 +1,6 @@
-# Database directory
+# Production database
 
-The application creates `bblotto_v34.db` automatically when SQLite is used.
-The database file is intentionally excluded from this package and from Git.
+`bblotto_v34.db` is intentionally excluded to prevent overwriting live member and administrator data.
 
-For Render/Railway production, set `BBLOTTO_DB_DIR` to the mounted persistent
-volume directory, or configure `DATABASE_URL` for PostgreSQL.
+Set `BBLOTTO_DB_DIR` to the existing persistent disk directory in production.
+For a new installation, the application can initialize a new database in the configured directory.
