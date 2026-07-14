@@ -17,8 +17,15 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .ai.cache_engine import get_analysis_cache as _persistent_analysis_cache
+from .ai.score_engine import (
+    SCORE_ENGINE_VERSION,
+    build_number_weights as _build_number_weights,
+    pair_strength as _score_pair_strength,
+    score_combo as _score_combo_v13,
+    triple_strength as _score_triple_strength,
+)
 
-ENGINE_VERSION = "BBLOTTO_AI_FULL_HISTORY_FAST_V12"
+ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_V13_02"
 _CACHE_LOCK = threading.RLock()
 _MEMORY_CACHE: Dict[str, Any] = {}
 _SYNC_LOCK = threading.Lock()
@@ -251,25 +258,7 @@ def latest_stats(limit: int = 0) -> Dict[str, Any]:
 
 
 def _mode_weights(cache: Dict[str, Any], mode: str, grade: str) -> Dict[int, float]:
-    base = {n: float(cache["score_map"].get(str(n), 50.0)) for n in range(1, 46)}
-    gaps = cache.get("gap", {})
-    f10, f30 = cache.get("frequency10", {}), cache.get("frequency30", {})
-    mode = (mode or "balanced").lower()
-    grade = str(grade or "일반")
-    for n in range(1, 46):
-        if mode in {"hot", "강세", "aggressive"}:
-            base[n] += 3.2 * f10.get(str(n), 0) + 1.2 * f30.get(str(n), 0)
-        elif mode in {"cold", "반등", "rebound"}:
-            base[n] += 2.4 * min(15, gaps.get(str(n), 0))
-        else:
-            base[n] += 0.8 * min(12, gaps.get(str(n), 0))
-        if grade == "1등":
-            base[n] = base[n] ** 1.08
-        elif grade == "2등":
-            base[n] = base[n] ** 1.04
-        base[n] = max(0.01, base[n])
-    return base
-
+    return _build_number_weights(cache, mode=mode, grade=grade)
 
 def _weighted_sample(rng: random.Random, weights: Dict[int, float], k: int, excluded: set[int]) -> List[int]:
     pool = [n for n in range(1, 46) if n not in excluded]
@@ -290,38 +279,15 @@ def _weighted_sample(rng: random.Random, weights: Dict[int, float], k: int, excl
 
 
 def _pair_strength(nums: Sequence[int], cache: Dict[str, Any]) -> float:
-    pairs = cache.get("pair_counts", {})
-    vals = [pairs.get(f"{a}-{b}", 0) for a, b in combinations(sorted(nums), 2)]
-    return sum(vals) / max(1, len(vals))
+    return _score_pair_strength(nums, cache)
 
 
 def _triple_strength(nums: Sequence[int], cache: Dict[str, Any]) -> float:
-    triples = cache.get("triple_counts", {})
-    return sum(triples.get("-".join(map(str, t)), 0) for t in combinations(sorted(nums), 3))
+    return _score_triple_strength(nums, cache)
 
 
 def _combo_score(nums: Sequence[int], cache: Dict[str, Any], weights: Dict[int, float]) -> Tuple[float, Dict[str, Any]]:
-    sig = _sig(nums)
-    p = cache.get("pattern", {})
-    score = sum(weights[n] for n in nums) / 6.0
-    sum_sd = max(10.0, float(p.get("sum_sd", 25)))
-    score += 12.0 * math.exp(-((sig["sum"] - float(p.get("sum_mean", 138))) ** 2) / (2 * sum_sd ** 2))
-    score += 7.0 * math.exp(-((sig["odd"] - float(p.get("odd_mean", 3))) ** 2) / 2.0)
-    score += 5.0 * math.exp(-((sig["ac"] - float(p.get("ac_mean", 7))) ** 2) / 5.0)
-    score += min(7.5, _pair_strength(nums, cache) * 0.9)
-    score += min(3.5, _triple_strength(nums, cache) * 0.7)
-    if max(sig["zones"]) <= 3: score += 4.0
-    if sig["max_end_dup"] <= 2: score += 3.0
-    if sig["spread"] >= 25: score += 2.0
-    if sig["consecutive"] <= 2: score += 1.5
-    latest_sets = [set(x) for x in cache.get("latest_numbers", [])]
-    max_overlap = max((len(set(nums) & x) for x in latest_sets), default=0)
-    if max_overlap >= 4: score -= 10.0
-    elif max_overlap == 3: score -= 2.5
-    detail = dict(sig)
-    detail.update({"pair_strength": round(_pair_strength(nums, cache), 2), "triple_strength": round(_triple_strength(nums, cache), 2), "max_recent_overlap": max_overlap})
-    return round(score, 4), detail
-
+    return _score_combo_v13(nums, cache, weights, _sig)
 
 def _valid(nums: Sequence[int]) -> bool:
     if len(set(nums)) != 6: return False
@@ -417,13 +383,13 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
 
     elapsed = round((time.perf_counter() - started) * 1000, 2)
     stats = {
-        "engine_version": ENGINE_VERSION, "engine": ENGINE_VERSION, "full_history": True,
+        "engine_version": ENGINE_VERSION, "engine": ENGINE_VERSION, "score_engine_version": SCORE_ENGINE_VERSION, "full_history": True,
         "draw_count": cache.get("draw_count", 0), "latest_round": cache.get("latest_round", 0),
         "analysis_confirm": cache.get("analysis_confirm"), "cache_build_ms": cache.get("build_ms", 0),
         "generation_ms": elapsed, "candidate_count": len(pool), "attempts": attempts,
         "hot": cache.get("hot", [])[:12], "cold": cache.get("cold", [])[:12], "overdue": cache.get("overdue", [])[:12],
         "unique_numbers": len(usage), "max_number_use": max(usage.values(), default=0),
-        "methodology": ["1회차~최신 회차 전체 분석", "최근 10·30·50·100·300회 다중 가중치", "미출현 간격·모멘텀", "동반출현·트리플", "홀짝·구간·합계·AC·끝수", "조합 간 중복 억제"],
+        "methodology": ["AI-01 영구 캐시 기반", "1회차~최신 회차 전체 분석", "최근 10·30·50·100·300회 다중 가중치", "미출현 간격·모멘텀", "동반출현·트리플", "홀짝·구간·합계·AC·끝수", "조합 간 중복 억제"],
     }
     return selected[:target], selected_details[:target], stats
 
