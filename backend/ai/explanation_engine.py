@@ -229,6 +229,62 @@ def _condition_line(fixed: Any, excluded: Any) -> str:
     return ". ".join(parts) + "." if parts else ""
 
 
+def _number_reason(number: int, evidence: Mapping[int, Mapping[str, Any]]) -> str:
+    item = evidence.get(number, {})
+    role = str(item.get("role") or "균형수")
+    f10 = _as_int(item.get("freq10"))
+    f30 = _as_int(item.get("freq30"))
+    gap = _as_int(item.get("gap"))
+    if role == "강세수":
+        return f"{number}번(강세수·최근 10회 {f10}회/30회 {f30}회)"
+    if role == "반등수":
+        return f"{number}번(반등수·{gap}회 미출현)"
+    return f"{number}번(균형수·단기/중기 흐름 안정)"
+
+
+def _actual_selection_line(details: Sequence[Mapping[str, Any]], evidence: Mapping[int, Mapping[str, Any]]) -> str:
+    use_counts = Counter(number for detail in details for number in detail["numbers"])
+    ranked = sorted(use_counts, key=lambda n: (-use_counts[n], -_as_float(evidence.get(n, {}).get("selection_score")), n))
+    core = ranked[: min(4, len(ranked))]
+    if not core:
+        return "실제 생성된 조합에서 공통 핵심수를 확인하지 못했습니다."
+    described = ", ".join(_number_reason(n, evidence) for n in core)
+    counts = ", ".join(f"{n}번 {use_counts[n]}개 조합" for n in core)
+    return f"실제 추천번호에서는 {described}을 핵심 축으로 선택했으며, 사용 비중은 {counts}입니다."
+
+
+def _actual_combo_line(details: Sequence[Mapping[str, Any]]) -> str:
+    ranked = sorted(details, key=lambda d: (-_as_float(d.get("score")), d["numbers"]))
+    best = ranked[0]
+    combo = best["numbers"]
+    combo_text = "·".join(map(str, combo))
+    odd = _as_int(best.get("odd"), sum(n % 2 for n in combo))
+    even = _as_int(best.get("even"), 6 - odd)
+    zones = best.get("zones") or [sum(n <= 15 for n in combo), sum(16 <= n <= 30 for n in combo), sum(n >= 31 for n in combo)]
+    total = _as_int(best.get("sum"), sum(combo))
+    ac = _as_int(best.get("ac"))
+    kind = str(best.get("type") or best.get("strategy") or "균형형")
+    return f"가장 높은 평가를 받은 [{combo_text}] 조합은 {kind}으로, 홀짝 {odd}:{even}·구간 {zones[0]}-{zones[1]}-{zones[2]}·합계 {total}·AC {ac} 조건을 충족해 최종 선별됐습니다."
+
+
+def _actual_portfolio_line(portfolio: Mapping[str, Any], details: Sequence[Mapping[str, Any]]) -> str:
+    lowest = min(details, key=lambda d: (_as_float(d.get("score")), d["numbers"]))
+    low_text = "·".join(map(str, lowest["numbers"]))
+    return (
+        f"전체 추천 조합은 합계 {portfolio['sum_min']}~{portfolio['sum_max']}, 홀짝 중심형 {portfolio['odd_mode']}:{6-portfolio['odd_mode']}로 분산했고, "
+        f"조합 간 최대 중복을 {portfolio['max_overlap']}개로 제한했습니다. [{low_text}] 같은 보완 조합도 포함해 동일 번호 편중을 줄였습니다."
+    )
+
+
+def _actual_pair_line(details: Sequence[Mapping[str, Any]], portfolio: Mapping[str, Any]) -> str:
+    pair_best = max(details, key=lambda d: (_as_float(d.get("pair_strength")), _as_float(d.get("score"))))
+    combo_text = "·".join(map(str, pair_best["numbers"]))
+    pair_strength = _as_float(pair_best.get("pair_strength"))
+    if pair_strength > 0:
+        return f"동반출현 근거는 [{combo_text}] 조합에 가장 강하게 반영됐고(점수 {pair_strength:.1f}), 전체에서는 {portfolio['unique_numbers']}개 번호를 사용해 특정 번호쌍의 반복을 억제했습니다."
+    return f"동반출현은 보조 기준으로만 사용하고, 전체 {portfolio['unique_numbers']}개 번호와 연속수 {portfolio['consecutive']}쌍을 분산해 조합별 형태를 다르게 구성했습니다."
+
+
 def build_round_analysis(
     round_no: int,
     stats: Mapping[str, Any] | None,
@@ -237,31 +293,23 @@ def build_round_analysis(
     excluded: Any,
     details: Sequence[Mapping[str, Any]],
 ) -> str:
-    """Create a factual 3-5 line Korean analysis from AI-01/AI-02 results."""
+    """Explain the numbers that were actually generated, not a generic trend summary."""
     valid = _valid_details(details)
     if not valid:
         return "추천 조합의 분석 근거가 없어 설명을 만들 수 없습니다. 번호를 다시 생성해 주세요."
 
-    try:
-        cache = get_analysis_cache(False, target_round=_as_int(round_no))
-    except Exception:
-        cache = dict(stats or {})
-    if not cache:
-        cache = dict(stats or {})
-
     portfolio = _portfolio_metrics(valid)
     evidence = _evidence_map(valid)
-    roles = _role_metrics(evidence, portfolio)
-    actual_round = _as_int(round_no, _as_int(cache.get("latest_round")) + 1)
-    seed = f"{actual_round}|{mode}|{portfolio['combos']}|{cache.get('latest_round')}|{roles}"
+    actual_round = _as_int(round_no, 1)
 
     lines = [
-        _trend_line(actual_round, cache, seed),
-        _selection_line(roles, cache, seed),
-        _balance_line(portfolio, seed),
-        _diversity_line(portfolio, valid, seed),
+        f"{actual_round}회차 추천번호 생성 결과를 기준으로 설명합니다. " + _actual_selection_line(valid, evidence),
+        _actual_combo_line(valid),
+        _actual_portfolio_line(portfolio, valid),
+        _actual_pair_line(valid, portfolio),
     ]
     condition = _condition_line(fixed, excluded)
     if condition:
         lines.append(condition)
     return "\n".join(line for line in lines[:5] if line)
+
