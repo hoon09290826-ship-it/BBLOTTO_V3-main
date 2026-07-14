@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
 from itertools import combinations
@@ -151,26 +152,97 @@ def _source_rounds() -> List[int]:
         return []
 
 
-def _official_fetch(round_no: int, timeout: int = 5) -> Optional[Dict[str, Any]]:
-    """Fetch one official draw. Used only by the administrator repair action."""
-    url = f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={int(round_no)}"
+def _normalize_new_official_payload(data: Any, round_no: int) -> Optional[Dict[str, Any]]:
+    """Normalize the current 동행복권 lt645 JSON response."""
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 BBLOTTO/13"})
-        with urllib.request.urlopen(request, timeout=max(2, int(timeout))) as response:
-            data = json.loads(response.read().decode("utf-8"))
-        if data.get("returnValue") != "success":
+        rows = ((data or {}).get("data") or {}).get("list") or []
+        item = rows[0] if rows else None
+        if not isinstance(item, dict) or int(item.get("ltEpsd") or 0) != int(round_no):
             return None
-        numbers = [int(data[f"drwtNo{i}"]) for i in range(1, 7)]
-        if len(numbers) != 6:
+        numbers = [int(item.get(f"tm{i}WnNo") or 0) for i in range(1, 7)]
+        bonus = int(item.get("bnsWnNo") or 0)
+        if len(set(numbers)) != 6 or not all(1 <= n <= 45 for n in numbers):
+            return None
+        raw_date = str(item.get("ltRflYmd") or "")
+        draw_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}" if len(raw_date) == 8 else raw_date
+        return {"round": int(round_no), "date": draw_date, "numbers": sorted(numbers), "bonus": bonus}
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def _normalize_legacy_official_payload(data: Any, round_no: int) -> Optional[Dict[str, Any]]:
+    """Normalize the legacy common.do JSON response when it is still available."""
+    try:
+        if not isinstance(data, dict) or data.get("returnValue") != "success":
+            return None
+        numbers = [int(data.get(f"drwtNo{i}") or 0) for i in range(1, 7)]
+        bonus = int(data.get("bnusNo") or 0)
+        if len(set(numbers)) != 6 or not all(1 <= n <= 45 for n in numbers):
             return None
         return {
-            "round": int(data["drwNo"]),
+            "round": int(data.get("drwNo") or round_no),
             "date": str(data.get("drwNoDate") or ""),
             "numbers": sorted(numbers),
-            "bonus": int(data.get("bnusNo") or 0),
+            "bonus": bonus,
         }
-    except Exception:
+    except (TypeError, ValueError):
         return None
+
+
+def _official_fetch(round_no: int, timeout: int = 8) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Fetch one draw from the current official endpoint with legacy fallback.
+
+    Returns ``(draw, error)`` so the administrator screen can display the real
+    connection failure instead of incorrectly referring to Render.
+    """
+    r = int(round_no)
+    timestamp = int(time.time() * 1000)
+    endpoints = [
+        (
+            f"https://www.dhlottery.co.kr/lt645/selectPstLt645Info.do?srchLtEpsd={r}&_={timestamp}",
+            _normalize_new_official_payload,
+        ),
+        (
+            f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={r}",
+            _normalize_legacy_official_payload,
+        ),
+    ]
+    errors: List[str] = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; BBLOTTO/13.1; +https://www.dhlottery.co.kr/)",
+        "Accept": "application/json,text/plain,*/*",
+        "Referer": "https://www.dhlottery.co.kr/lt645/result",
+        "Cache-Control": "no-cache",
+    }
+    for url, normalizer in endpoints:
+        for attempt in range(1, 4):
+            try:
+                request = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(request, timeout=max(3, int(timeout))) as response:
+                    body = response.read().decode("utf-8", errors="replace")
+                data = json.loads(body)
+                normalized = normalizer(data, r)
+                if normalized:
+                    return normalized, ""
+                errors.append(f"응답 형식 불일치({url.split('/')[3]})")
+                break
+            except urllib.error.HTTPError as exc:
+                errors.append(f"HTTP {exc.code}")
+                if exc.code in (400, 401, 403, 404):
+                    break
+            except urllib.error.URLError as exc:
+                errors.append(f"연결 실패: {getattr(exc, 'reason', exc)}")
+            except TimeoutError:
+                errors.append("연결 시간 초과")
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                errors.append("JSON 응답 해석 실패")
+                break
+            except Exception as exc:
+                errors.append(f"{type(exc).__name__}: {exc}")
+            if attempt < 3:
+                time.sleep(0.35 * attempt)
+    unique_errors = list(dict.fromkeys(str(item)[:120] for item in errors if item))
+    return None, "; ".join(unique_errors[-4:]) or "공식 당첨번호 응답 없음"
 
 
 def _save_repaired_draws(draws: Sequence[Dict[str, Any]]) -> int:
@@ -209,40 +281,58 @@ def _save_repaired_draws(draws: Sequence[Dict[str, Any]]) -> int:
 
 
 def repair_missing_history(max_round: Optional[int] = None, chunk_size: int = 25) -> Dict[str, Any]:
-    """Fill a bounded batch of missing source draws, then rebuild the analysis cache.
-
-    The endpoint calls this repeatedly, avoiding a single long request while still
-    repairing old partial databases such as 1131~1232-only installations.
-    """
+    """Fill a bounded batch of missing draws without changing other features."""
     rounds = _source_rounds()
     latest = int(max_round or (max(rounds) if rounds else 0))
     if latest <= 0:
         payload = refresh_cache(force=True)
-        return {"ok": True, "saved": 0, "completed": False, "cache": payload, "message": "당첨 회차 데이터가 없습니다."}
+        return {"ok": False, "saved": 0, "requested": 0, "completed": False, "remaining": 0,
+                "cache": payload, "message": "기준이 될 당첨 회차 데이터가 없습니다.",
+                "error": "draws 테이블에 회차 데이터가 없습니다."}
     existing = set(rounds)
     missing = [round_no for round_no in range(1, latest + 1) if round_no not in existing]
-    batch = missing[:max(1, min(int(chunk_size or 25), 100))]
+    batch = missing[:max(1, min(int(chunk_size or 25), 50))]
     fetched: List[Dict[str, Any]] = []
+    failures: List[Tuple[int, str]] = []
     if batch:
-        workers = min(8, len(batch))
+        workers = min(4, len(batch))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="bblotto-history-repair") as executor:
             futures = {executor.submit(_official_fetch, round_no): round_no for round_no in batch}
             for future in as_completed(futures):
-                result = future.result()
+                round_no = futures[future]
+                try:
+                    result, error = future.result()
+                except Exception as exc:
+                    result, error = None, f"{type(exc).__name__}: {exc}"
                 if result:
                     fetched.append(result)
+                else:
+                    failures.append((round_no, error or "응답 없음"))
         fetched.sort(key=lambda item: item["round"])
         _save_repaired_draws(fetched)
     payload = refresh_cache(force=True)
     remaining = int(payload.get("missing_rounds_count", 0) or 0)
+    error_text = ""
+    if failures:
+        samples = ", ".join(f"{r}회({e})" for r, e in failures[:3])
+        error_text = f"공식 동행복권 연결 실패: {samples}"
+    if remaining == 0:
+        message = "전체 회차 복구 완료"
+    elif fetched:
+        message = f"누락 회차 복구 중: {len(fetched)}개 저장, {remaining}개 남음"
+    else:
+        message = error_text or "공식 당첨번호를 가져오지 못했습니다."
     return {
-        "ok": True,
+        "ok": bool(not batch or fetched),
         "saved": len(fetched),
         "requested": len(batch),
+        "failed": len(failures),
+        "failed_rounds": [r for r, _ in failures[:10]],
         "completed": remaining == 0 and bool(payload.get("is_full_history")),
         "remaining": remaining,
         "cache": payload,
-        "message": "전체 회차 복구 완료" if remaining == 0 else f"누락 회차 복구 중: {remaining}개 남음",
+        "message": message,
+        "error": error_text,
     }
 
 

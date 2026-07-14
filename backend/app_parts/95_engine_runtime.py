@@ -1790,9 +1790,12 @@ try:
             'ok': bool(result.get('ok', True)),
             'completed': bool(result.get('completed') or payload['is_full_history']),
             'message': result.get('message') or payload['analysis_confirm'],
+            'error': result.get('error') or '',
             'saved': int(result.get('saved') or 0),
             'requested': int(result.get('requested') or 0),
-            'remaining': int(result.get('remaining') or payload['missing_rounds_count']),
+            'failed': int(result.get('failed') or 0),
+            'failed_rounds': result.get('failed_rounds') or [],
+            'remaining': int(result.get('remaining') if result.get('remaining') is not None else payload['missing_rounds_count']),
             'cache': payload,
         }
 
