@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 from .ai.explanation_engine import (
     EXPLANATION_ENGINE_VERSION,
     build_round_analysis,
+    build_recommendation_analysis as _build_actual_recommendation_analysis,
 )
 
 
@@ -25,7 +26,7 @@ def build_evidence_analysis(
 
 
 def build_recommendation_analysis(round_no: int, details: List[Dict[str, Any]]) -> str:
-    return build_round_analysis(round_no, {}, "balanced", None, None, details)
+    return _build_actual_recommendation_analysis(round_no, details)
 
 
 __all__ = [
