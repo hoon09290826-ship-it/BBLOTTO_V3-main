@@ -72,16 +72,46 @@ def _rc113_client_ip(request: Request) -> str:
     return request.client.host if request.client else 'unknown'
 
 def _rc113_validate_origin(request: Request):
+    """Validate same-origin API writes behind Railway/Render proxies.
+
+    Reverse proxies may expose the public scheme/host only through Forwarded or
+    X-Forwarded-* headers. Comparing Origin with the internal ASGI host can
+    therefore reject a legitimate login request. Build a small allow-list from
+    trusted request headers and require an exact normalized origin match.
+    """
     if request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'} or not request.url.path.startswith('/api/'):
         return
-    origin = str(request.headers.get('origin', '') or '').strip()
+    origin = str(request.headers.get('origin', '') or '').strip().rstrip('/')
     if not origin:
         return
-    expected = f'{request.url.scheme}://{request.headers.get("host", "")}'.rstrip('/')
-    forwarded_proto = str(request.headers.get('x-forwarded-proto', '') or '').split(',')[0].strip()
-    if forwarded_proto:
-        expected = f'{forwarded_proto}://{request.headers.get("host", "")}'.rstrip('/')
-    if origin.rstrip('/') != expected:
+
+    def first_header(name: str) -> str:
+        return str(request.headers.get(name, '') or '').split(',')[0].strip()
+
+    forwarded_proto = first_header('x-forwarded-proto')
+    forwarded_host = first_header('x-forwarded-host')
+    direct_host = first_header('host')
+    scheme = forwarded_proto or request.url.scheme or 'https'
+
+    allowed_origins = set()
+    for host in (forwarded_host, direct_host):
+        if host:
+            allowed_origins.add(f'{scheme}://{host}'.rstrip('/'))
+
+    # RFC 7239 Forwarded: proto=https;host=example.com
+    forwarded = first_header('forwarded')
+    if forwarded:
+        attrs = {}
+        for item in forwarded.split(';'):
+            if '=' in item:
+                key, value = item.split('=', 1)
+                attrs[key.strip().lower()] = value.strip().strip('"')
+        f_proto = attrs.get('proto') or scheme
+        f_host = attrs.get('host')
+        if f_host:
+            allowed_origins.add(f'{f_proto}://{f_host}'.rstrip('/'))
+
+    if origin not in allowed_origins:
         raise HTTPException(403, '허용되지 않은 요청 출처입니다.')
 
 def validate_admin_username(username: str) -> str:
