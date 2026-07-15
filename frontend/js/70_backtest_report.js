@@ -11,7 +11,7 @@ function setProgress(run){
   activeRun=run||activeRun;if(!activeRun)return;
   const total=Math.max(1,Number(activeRun.total_rounds||0)), done=Number(activeRun.processed_rounds||0), p=Math.min(100,done*100/total);
   if(el('backtestProgressBar'))el('backtestProgressBar').style.width=p.toFixed(2)+'%';
-  if(el('backtestProgressText'))el('backtestProgressText').textContent=`${activeRun.start_round||'-'}~${activeRun.end_round||'-'}회 · ${done}/${total}회 처리 · 성공 ${activeRun.success_rounds||0} · 실패 ${activeRun.failed_rounds||0} · 상태 ${activeRun.status||'-'}`;
+  if(el('backtestProgressText')){const validationStart=Number(activeRun.start_round||0),dataStart=validationStart>1?validationStart-1:validationStart;el('backtestProgressText').textContent=`전체 데이터 ${dataStart||'-'}~${activeRun.end_round||'-'}회 · 백테스트 검증 ${activeRun.start_round||'-'}~${activeRun.end_round||'-'}회 · ${done}/${total}회 처리 · 성공 ${activeRun.success_rounds||0} · 실패 ${activeRun.failed_rounds||0} · 상태 ${activeRun.status||'-'}`;}
   setBadge(activeRun.status==='completed'?'완료':activeRun.status==='running'?'실행 중':activeRun.status==='cancelled'?'중단':'대기');
 }
 async function loadRuns(){
