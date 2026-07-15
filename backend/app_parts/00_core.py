@@ -321,7 +321,7 @@ class PgCursorCompat:
             return self._table_info_rows(m.group(1).strip().strip('"'))
         s = self._convert_sql(sql)
         # lastrowid가 필요한 주요 INSERT는 RETURNING id 추가
-        if re.match(r'\s*INSERT\s+INTO\s+(members|recommendations|sms_logs)\s*\(', s, re.I) and 'RETURNING' not in s and 'ON CONFLICT' not in s:
+        if re.match(r'\s*INSERT\s+INTO\s+(members|recommendations|sms_logs|backtest_runs|ai_lab_profiles|ai_lab_versions|ai_lab_jobs|ai_lab_activations)\s*\(', s, re.I) and 'RETURNING' not in s and 'ON CONFLICT' not in s:
             s += ' RETURNING id'
         try:
             self.cur.execute(s, params)

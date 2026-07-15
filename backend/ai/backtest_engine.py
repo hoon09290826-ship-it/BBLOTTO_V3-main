@@ -80,6 +80,14 @@ def _parse_numbers(value: Any) -> List[int]:
     return sorted(out)
 
 
+def _ensure_columns(c: Any, table: str, columns: Dict[str, str]) -> None:
+    """Add columns missing from older SQLite/PostgreSQL deployments."""
+    existing = {str(row[1]) for row in c.execute(f"PRAGMA table_info({table})").fetchall()}
+    for name, definition in columns.items():
+        if name not in existing:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
+
 def ensure_backtest_tables(c: Any) -> None:
     c.execute(
         "CREATE TABLE IF NOT EXISTS backtest_runs("
@@ -104,6 +112,32 @@ def ensure_backtest_tables(c: Any) -> None:
         "status TEXT DEFAULT 'ok', error_message TEXT DEFAULT '', created_at TEXT DEFAULT ''"
         ")"
     )
+    _ensure_columns(c, "backtest_runs", {
+        "status": "TEXT DEFAULT 'ready'", "start_round": "INTEGER DEFAULT 1",
+        "end_round": "INTEGER DEFAULT 0", "next_round": "INTEGER DEFAULT 1",
+        "combo_count": "INTEGER DEFAULT 10", "min_history": "INTEGER DEFAULT 1",
+        "mode": "TEXT DEFAULT 'balanced'", "engine_version": "TEXT DEFAULT ''",
+        "backtest_version": "TEXT DEFAULT ''", "total_rounds": "INTEGER DEFAULT 0",
+        "processed_rounds": "INTEGER DEFAULT 0", "success_rounds": "INTEGER DEFAULT 0",
+        "failed_rounds": "INTEGER DEFAULT 0", "skipped_rounds": "INTEGER DEFAULT 0",
+        "created_by": "INTEGER DEFAULT 0", "created_at": "TEXT DEFAULT ''",
+        "started_at": "TEXT DEFAULT ''", "completed_at": "TEXT DEFAULT ''",
+        "updated_at": "TEXT DEFAULT ''", "error_message": "TEXT DEFAULT ''",
+    })
+    _ensure_columns(c, "backtest_results", {
+        "run_id": "INTEGER DEFAULT 0", "target_round": "INTEGER DEFAULT 0",
+        "history_from": "INTEGER DEFAULT 0", "history_to": "INTEGER DEFAULT 0",
+        "history_count": "INTEGER DEFAULT 0", "mode": "TEXT DEFAULT 'balanced'",
+        "engine_version": "TEXT DEFAULT ''", "seed": "TEXT DEFAULT ''",
+        "winning_numbers": "TEXT DEFAULT '[]'", "bonus": "INTEGER DEFAULT 0",
+        "recommended_numbers": "TEXT DEFAULT '[]'", "details_json": "TEXT DEFAULT '[]'",
+        "best_match": "INTEGER DEFAULT 0", "best_rank": "TEXT DEFAULT '낙첨'",
+        "match_distribution": "TEXT DEFAULT '{}'", "pool_match_count": "INTEGER DEFAULT 0",
+        "pool_numbers": "TEXT DEFAULT '[]'", "avg_combo_score": "REAL DEFAULT 0",
+        "max_combo_score": "REAL DEFAULT 0", "generation_ms": "REAL DEFAULT 0",
+        "status": "TEXT DEFAULT 'ok'", "error_message": "TEXT DEFAULT ''",
+        "created_at": "TEXT DEFAULT ''",
+    })
     c.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_backtest_results_run_round "
         "ON backtest_results(run_id,target_round)"
@@ -210,13 +244,23 @@ def create_run(c: Any, *, created_by: int, combo_count: int = DEFAULT_COMBO_COUN
     min_history = max(1, int(min_history or DEFAULT_MIN_HISTORY))
     start_round = first_round + 1
     eligible = [d for d in draws if int(d["round"]) >= start_round]
+    _now_value = _now()
     cur = c.execute(
         "INSERT INTO backtest_runs(status,start_round,end_round,next_round,combo_count,min_history,mode,engine_version,backtest_version,total_rounds,processed_rounds,success_rounds,failed_rounds,skipped_rounds,created_by,created_at,updated_at) "
         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        ("ready", start_round, last_round, start_round, combo_count, min_history, mode or "balanced", ENGINE_VERSION, BACKTEST_VERSION, len(eligible), 0, 0, 0, 0, created_by, _now(), _now()),
+        ("ready", start_round, last_round, start_round, combo_count, min_history, mode or "balanced", ENGINE_VERSION, BACKTEST_VERSION, len(eligible), 0, 0, 0, 0, created_by, _now_value, _now_value),
     )
+    run_id = _safe_int(getattr(cur, "lastrowid", None), 0, minimum=0)
+    if run_id <= 0:
+        row = c.execute(
+            "SELECT id FROM backtest_runs WHERE created_by=? AND created_at=? ORDER BY id DESC LIMIT 1",
+            (created_by, _now_value),
+        ).fetchone()
+        run_id = _safe_int(row["id"] if row else 0, 0, minimum=0)
     c.commit()
-    return get_run(c, int(cur.lastrowid))
+    if run_id <= 0:
+        raise RuntimeError("백테스트 실행 정보 생성 후 ID를 확인하지 못했습니다.")
+    return get_run(c, run_id)
 
 
 def get_run(c: Any, run_id: int) -> Dict[str, Any]:
