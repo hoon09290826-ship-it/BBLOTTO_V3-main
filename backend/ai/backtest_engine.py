@@ -321,7 +321,30 @@ def get_summary(c: Any, run_id: int) -> Dict[str, Any]:
         }
         for k, v in sorted(strategy_agg.items())
     }
-    return {"run": run, "summary": by_window["all"], "by_window": by_window, "by_strategy": by_strategy}
+
+    # RC6-B report data: keep the UI light by returning 50-round trend blocks
+    # instead of forcing the browser to download every detailed result.
+    trend_blocks: List[Dict[str, Any]] = []
+    block_size = 50
+    for start in range(0, len(records), block_size):
+        block = records[start:start + block_size]
+        if not block:
+            continue
+        metrics = summarize(block)
+        trend_blocks.append({
+            "label": f"{int(block[0]['target_round'])}~{int(block[-1]['target_round'])}",
+            "from_round": int(block[0]["target_round"]),
+            "to_round": int(block[-1]["target_round"]),
+            **metrics,
+        })
+
+    return {
+        "run": run,
+        "summary": by_window["all"],
+        "by_window": by_window,
+        "by_strategy": by_strategy,
+        "trend_blocks": trend_blocks,
+    }
 
 
 def get_results(c: Any, run_id: int, page: int = 1, page_size: int = 30) -> Dict[str, Any]:

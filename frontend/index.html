@@ -68,7 +68,7 @@
     <button type="button" class="admin-tab-btn active" data-admin-panel="adminManagers">관리자</button>
     <button type="button" class="admin-tab-btn" data-admin-panel="adminLogsPanel">활동로그</button>
     <button type="button" class="admin-tab-btn" data-admin-panel="adminBackupPanel">백업</button>
-    <button type="button" class="admin-tab-btn" data-admin-panel="adminAiEnginePanel">AI 엔진</button>
+    <button type="button" class="admin-tab-btn" data-admin-panel="adminAiEnginePanel">AI 엔진</button><button type="button" class="admin-tab-btn" data-admin-panel="adminBacktestPanel">백테스트</button>
   </div>
 
   <div class="admin-final-grid">
@@ -97,6 +97,29 @@
       </div>
       <div id="aiV6CacheStatus" class="hint">아직 확인하지 않았습니다.</div>
     </div>
+
+    <div id="adminBacktestBox" class="box admin-final-card super-only admin-final-tab-panel rc6b-report" data-admin-panel-box="adminBacktestPanel">
+      <div class="card-head-line"><h3>전체 회차 백테스트 리포트</h3><span id="backtestBadge">대기</span></div>
+      <p class="hint">각 회차의 직전 데이터만 사용해 1회차부터 최신 회차까지 순차 검증합니다. 실행 중단 후에도 이어서 진행할 수 있습니다.</p>
+      <div class="btnrow wrap">
+        <select id="backtestMode"><option value="balanced">균형형</option><option value="conservative">보수형</option><option value="aggressive">공격형</option></select>
+        <select id="backtestComboCount"><option value="5">5조합</option><option value="10" selected>10조합</option><option value="15">15조합</option><option value="20">20조합</option></select>
+        <button id="backtestStart" class="primary">새 분석 시작</button>
+        <button id="backtestContinue">이어 실행</button>
+        <button id="backtestRefresh">결과 새로고침</button>
+        <button id="backtestCancel" class="danger">중단</button>
+      </div>
+      <div class="backtest-progress"><div id="backtestProgressBar"></div></div>
+      <div id="backtestProgressText" class="hint">실행 이력이 없습니다.</div>
+      <div id="backtestKpis" class="cards compact backtest-kpis"></div>
+      <div class="backtest-report-grid">
+        <div><h4>기간별 성과</h4><div id="backtestWindows" class="backtest-table hint">결과가 없습니다.</div></div>
+        <div><h4>전략별 성과</h4><div id="backtestStrategies" class="backtest-table hint">결과가 없습니다.</div></div>
+      </div>
+      <h4>50회차 단위 성과 추이</h4><div id="backtestTrend" class="backtest-trend hint">결과가 없습니다.</div>
+      <h4>최근 회차 상세</h4><div id="backtestResults" class="backtest-table hint">결과가 없습니다.</div>
+      <div id="backtestPager" class="pager"></div>
+    </div>
   </div>
 
   <div id="adminSecurityBox" class="super-only" style="display:none">
@@ -119,4 +142,4 @@
     </div>
   </div>
 </section>
-</main></div><script src="/js/00_core.js?v=stage9-1"></script><script src="/js/10_members_dashboard.js?v=stage9-1"></script><script src="/js/20_stats_winning_views.js?v=stage9-1"></script><script src="/js/30_admin.js?v=connection-only-20260714"></script><script src="/js/40_recommendations.js?v=stage9-1"></script><script src="/js/50_exports_sms.js?v=stage9-1"></script><script src="/js/60_winning_settings.js?v=stage9-1"></script><script src="/js/90_bootstrap.js?v=stage9-1"></script></body></html>
+</main></div><script src="/js/00_core.js?v=stage9-1"></script><script src="/js/10_members_dashboard.js?v=stage9-1"></script><script src="/js/20_stats_winning_views.js?v=stage9-1"></script><script src="/js/30_admin.js?v=connection-only-20260714"></script><script src="/js/40_recommendations.js?v=stage9-1"></script><script src="/js/50_exports_sms.js?v=stage9-1"></script><script src="/js/60_winning_settings.js?v=stage9-1"></script><script src="/js/70_backtest_report.js?v=rc6b-1"></script><script src="/js/90_bootstrap.js?v=stage9-1"></script></body></html>
