@@ -297,19 +297,46 @@ def _valid(nums: Sequence[int]) -> bool:
     return 75 <= s["sum"] <= 210 and 1 <= s["odd"] <= 5 and max(s["zones"]) <= 4 and s["max_end_dup"] <= 3 and s["ac"] >= 4 and s["consecutive"] <= 3
 
 
-def _number_evidence(n: int, cache: Dict[str, Any]) -> Dict[str, Any]:
+def _number_evidence(n: int, cache: Dict[str, Any], weights: Optional[Dict[int, float]] = None) -> Dict[str, Any]:
+    """Return the exact inputs used when number *n* was ranked.
+
+    The explanation layer consumes this record verbatim.  Keep values numeric
+    so the UI never has to invent a reason after generation.
+    """
     hot_rank = {x: i + 1 for i, x in enumerate(cache.get("hot", []))}
+    cold_rank = {x: i + 1 for i, x in enumerate(cache.get("cold", []))}
     overdue_rank = {x: i + 1 for i, x in enumerate(cache.get("overdue", []))}
-    f10 = cache.get("frequency10", {}).get(str(n), 0)
-    f30 = cache.get("frequency30", {}).get(str(n), 0)
-    gap = cache.get("gap", {}).get(str(n), 0)
-    if hot_rank.get(n, 99) <= 10:
-        role, reason = "강세수", f"최근 10회 {f10}회·30회 {f30}회 출현한 상승 흐름"
-    elif overdue_rank.get(n, 99) <= 10:
-        role, reason = "반등수", f"최근 {gap}회 미출현한 반등 관찰 후보"
-    else:
-        role, reason = "균형수", f"단기·중기 빈도와 전체 흐름이 균형적인 후보"
-    return {"number": n, "role": role, "reason": reason, "freq10": f10, "freq30": f30, "freq100": cache.get("frequency100", {}).get(str(n), 0), "gap": gap, "selection_score": cache.get("score_map", {}).get(str(n), 0)}
+    f10 = int(cache.get("frequency10", {}).get(str(n), 0) or 0)
+    f30 = int(cache.get("frequency30", {}).get(str(n), 0) or 0)
+    f100 = int(cache.get("frequency100", {}).get(str(n), 0) or 0)
+    gap = int(cache.get("gap", {}).get(str(n), 0) or 0)
+    momentum = float(cache.get("momentum", {}).get(str(n), 0) or 0)
+    base_score = float(cache.get("score_map", {}).get(str(n), 0) or 0)
+    final_weight = float((weights or {}).get(n, base_score) or 0)
+
+    factors: List[Dict[str, Any]] = []
+    if hot_rank.get(n, 999) <= 15:
+        factors.append({"code": "hot", "label": "최근 강세", "value": hot_rank[n], "text": f"HOT {hot_rank[n]}위"})
+    if momentum > 0.04:
+        factors.append({"code": "momentum", "label": "상승 모멘텀", "value": round(momentum, 4), "text": f"모멘텀 +{momentum:.3f}"})
+    if overdue_rank.get(n, 999) <= 15 or gap >= 7:
+        factors.append({"code": "overdue", "label": "미출현 보강", "value": gap, "text": f"{gap}회 미출현"})
+    if cold_rank.get(n, 999) <= 12:
+        factors.append({"code": "cold", "label": "저빈도 반등", "value": cold_rank[n], "text": f"COLD {cold_rank[n]}위"})
+    if not factors:
+        factors.append({"code": "balance", "label": "누적 균형", "value": round(base_score, 3), "text": f"전체 점수 {base_score:.1f}"})
+
+    primary = factors[0]["code"]
+    role = {"hot": "강세수", "momentum": "상승수", "overdue": "반등수", "cold": "저빈도 보강수"}.get(primary, "균형수")
+    reason = " · ".join(f["text"] for f in factors[:3])
+    return {
+        "number": n, "role": role, "reason": reason, "factors": factors,
+        "freq10": f10, "freq30": f30, "freq100": f100, "gap": gap,
+        "momentum": round(momentum, 5), "base_score": round(base_score, 4),
+        "selection_score": round(final_weight, 4),
+        "hot_rank": hot_rank.get(n), "cold_rank": cold_rank.get(n),
+        "overdue_rank": overdue_rank.get(n),
+    }
 
 
 def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None):
@@ -363,15 +390,18 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         if overdue_count >= 2: archetype = "반등 혼합형"
         elif hot_count >= 3: archetype = "최근 흐름형"
         elif detail["pair_strength"] >= 2.5: archetype = "동반출현형"
-        evidence = [_number_evidence(n, cache) for n in combo]
+        evidence = [_number_evidence(n, cache, weights) for n in combo]
         reasons = [
             f"최근·중기·전체 출현 흐름과 미출현 간격을 종합한 {archetype}",
             f"홀짝 {detail['odd']}:{detail['even']} · 구간 {detail['zones'][0]}-{detail['zones'][1]}-{detail['zones'][2]} · 합계 {detail['sum']}",
             f"AC {detail['ac']} · 끝수 {detail['end_types']}종 · 최근 당첨조합 최대 중복 {detail['max_recent_overlap']}개",
         ]
         selected_details.append({
-            "numbers": list(combo), "score": round(adjusted, 2), "engine_version": ENGINE_VERSION,
-            "engine": ENGINE_VERSION, "type": archetype, "strategy": archetype, "portfolio_type": archetype,
+            "numbers": list(combo), "score": round(adjusted, 2), "base_score": round(base_score, 2),
+            "diversity_penalty": round(diversity_penalty, 2), "overlap_penalty": round(max(0, overlap - 2) * 4.5, 2),
+            "max_previous_overlap": overlap, "selection_rank": len(selected),
+            "engine_version": ENGINE_VERSION, "engine": ENGINE_VERSION,
+            "type": archetype, "strategy": archetype, "portfolio_type": archetype,
             "number_evidence": evidence, "reasons": reasons, "reason": " / ".join(reasons), **detail,
         })
 
@@ -381,7 +411,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         if combo not in selected:
             score, detail = _combo_score(combo, cache, weights)
             selected.append(combo)
-            selected_details.append({"numbers": combo, "score": score, "engine_version": ENGINE_VERSION, "engine": ENGINE_VERSION, "type": "보완 균형형", "strategy": "보완 균형형", "portfolio_type": "보완 균형형", "number_evidence": [_number_evidence(n, cache) for n in combo], "reasons": ["전체 이력 가중치 기반 보완 조합"], "reason": "전체 이력 가중치 기반 보완 조합", **detail})
+            selected_details.append({"numbers": combo, "score": score, "engine_version": ENGINE_VERSION, "engine": ENGINE_VERSION, "type": "보완 균형형", "strategy": "보완 균형형", "portfolio_type": "보완 균형형", "number_evidence": [_number_evidence(n, cache, weights) for n in combo], "reasons": ["전체 이력 가중치 기반 보완 조합"], "reason": "전체 이력 가중치 기반 보완 조합", **detail})
 
     elapsed = round((time.perf_counter() - started) * 1000, 2)
     stats = {
