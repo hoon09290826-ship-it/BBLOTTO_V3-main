@@ -10,6 +10,7 @@ from .ai_lab_core import (
     _now,
     ensure_ai_lab_tables,
     get_job,
+    safe_int,
 )
 from .backtest_engine import (
     cancel_run,
@@ -21,7 +22,7 @@ from .backtest_engine import (
 )
 
 RUNNER_VERSION = "RC6_D1_2_BASELINE_RUNNER"
-_TERMINAL = {"completed", "failed", "cancelled"}
+_TERMINAL = {"completed", "cancelled"}
 
 
 def _write_note(
@@ -61,14 +62,15 @@ def _save_job_config(c: Any, job_id: int, config: Dict[str, Any]) -> None:
 def _configure_backtest_range(c: Any, run_id: int, range_type: str) -> Dict[str, Any]:
     run = get_run(c, run_id)
     draws = load_draws(c)
-    eligible = [int(d["round"]) for d in draws if int(d["round"]) >= int(run["start_round"])]
+    start_hint = safe_int(run.get("start_round"), 1, minimum=1)
+    eligible = [safe_int(d.get("round"), 0) for d in draws if safe_int(d.get("round"), 0) >= start_hint]
     if not eligible:
         raise ValueError("학습에 사용할 유효 회차가 없습니다.")
 
     wanted = 300 if range_type == "recent300" else 500 if range_type == "recent500" else len(eligible)
     selected = eligible[-wanted:]
-    start_round = int(selected[0])
-    end_round = int(selected[-1])
+    start_round = safe_int(selected[0], 1, minimum=1)
+    end_round = safe_int(selected[-1], start_round, minimum=start_round)
     c.execute(
         "UPDATE backtest_runs SET start_round=?,end_round=?,next_round=?,total_rounds=?,processed_rounds=0," 
         "success_rounds=0,failed_rounds=0,skipped_rounds=0,status='ready',started_at='',completed_at='',updated_at=?,error_message='' "
@@ -85,6 +87,13 @@ def initialize_job(c: Any, job_id: int, *, created_by: int = 0) -> Dict[str, Any
     job = get_job(c, job_id)
     if job["status"] in _TERMINAL:
         return job
+    if job["status"] == "failed":
+        c.execute(
+            "UPDATE ai_learning_jobs SET status='ready',error_message='',completed_at='',updated_at=? WHERE id=?",
+            (_now(), int(job_id)),
+        )
+        c.commit()
+        job = get_job(c, job_id)
 
     config = dict(job.get("config") or {})
     existing_run_id = int(config.get("baseline_backtest_run_id") or 0)
@@ -117,7 +126,7 @@ def initialize_job(c: Any, job_id: int, *, created_by: int = 0) -> Dict[str, Any
     c.execute(
         "UPDATE ai_learning_jobs SET status='ready',target_rounds=?,processed_rounds=0,config_json=?,result_json='{}'," 
         "error_message='',updated_at=? WHERE id=?",
-        (int(run["total_rounds"]), _json(config), _now(), int(job_id)),
+        (safe_int(run.get("total_rounds"), 0, minimum=0), _json(config), _now(), int(job_id)),
     )
     _write_note(
         c,
@@ -147,7 +156,19 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
         raise RuntimeError("기준 백테스트 실행 정보가 없습니다.")
 
     try:
-        result = process_step(c, run_id, step_size=max(1, min(5, int(step_size or 1))))
+        baseline_run = get_run(c, run_id)
+        start_value = safe_int(baseline_run.get("start_round"), 0)
+        end_value = safe_int(baseline_run.get("end_round"), 0)
+        next_value = safe_int(baseline_run.get("next_round"), 0)
+        total_value = safe_int(baseline_run.get("total_rounds"), 0)
+        if start_value <= 0 or end_value < start_value or next_value < start_value or total_value <= 0:
+            baseline_run = _configure_backtest_range(c, run_id, str(job.get("range_type") or "recent300"))
+            c.execute(
+                "UPDATE ai_learning_jobs SET target_rounds=?,processed_rounds=?,updated_at=? WHERE id=?",
+                (safe_int(baseline_run.get("total_rounds"), 0, minimum=0), safe_int(baseline_run.get("processed_rounds"), 0, minimum=0), _now(), int(job_id)),
+            )
+            c.commit()
+        result = process_step(c, run_id, step_size=safe_int(step_size, 1, minimum=1, maximum=5))
         run = result["run"]
         status = "completed" if result.get("done") else "running"
         started_at_sql = "started_at=CASE WHEN started_at='' THEN ? ELSE started_at END,"
@@ -155,8 +176,8 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
             f"UPDATE ai_learning_jobs SET status=?,processed_rounds=?,target_rounds=?,{started_at_sql}updated_at=?,error_message='' WHERE id=?",
             (
                 status,
-                int(run.get("processed_rounds") or 0),
-                int(run.get("total_rounds") or 0),
+                safe_int(run.get("processed_rounds"), 0, minimum=0),
+                safe_int(run.get("total_rounds"), 0, minimum=0),
                 _now(),
                 _now(),
                 int(job_id),
@@ -181,8 +202,8 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
             c.execute(
                 "UPDATE ai_learning_jobs SET status='completed',processed_rounds=?,target_rounds=?,result_json=?,completed_at=?,updated_at=? WHERE id=?",
                 (
-                    int(run.get("processed_rounds") or 0),
-                    int(run.get("total_rounds") or 0),
+                    safe_int(run.get("processed_rounds"), 0, minimum=0),
+                    safe_int(run.get("total_rounds"), 0, minimum=0),
                     _json(final_result),
                     _now(),
                     _now(),
@@ -219,7 +240,7 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
         updated = get_job(c, job_id)
         return {
             "job": updated,
-            "processed": int(result.get("processed") or 0),
+            "processed": safe_int(result.get("processed"), 0, minimum=0),
             "done": updated["status"] == "completed",
             "backtest_run": run,
         }

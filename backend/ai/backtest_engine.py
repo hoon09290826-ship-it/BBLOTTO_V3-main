@@ -15,6 +15,21 @@ DEFAULT_MIN_HISTORY = 1
 MAX_STEP_SIZE = 5
 
 
+def _safe_int(value: Any, default: int = 0, *, minimum: int | None = None, maximum: int | None = None) -> int:
+    try:
+        if value is None or value == "":
+            number = int(default)
+        else:
+            number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        number = int(default)
+    if minimum is not None and number < minimum:
+        number = minimum
+    if maximum is not None and number > maximum:
+        number = maximum
+    return number
+
+
 def _now() -> str:
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -68,6 +83,9 @@ def ensure_backtest_tables(c: Any) -> None:
         "CREATE INDEX IF NOT EXISTS idx_backtest_results_round "
         "ON backtest_results(target_round)"
     )
+    # Normalize legacy rows. Older deployments could leave numeric fields NULL,
+    # which later caused int(None) during AI LAB baseline execution.
+    c.execute("UPDATE backtest_runs SET start_round=COALESCE(start_round,1), end_round=COALESCE(end_round,0), next_round=COALESCE(next_round,start_round,1), combo_count=COALESCE(combo_count,10), min_history=COALESCE(min_history,1), total_rounds=COALESCE(total_rounds,0), processed_rounds=COALESCE(processed_rounds,0), success_rounds=COALESCE(success_rounds,0), failed_rounds=COALESCE(failed_rounds,0), skipped_rounds=COALESCE(skipped_rounds,0), created_by=COALESCE(created_by,0)")
 
 
 def load_draws(c: Any) -> List[Dict[str, Any]]:
@@ -78,10 +96,10 @@ def load_draws(c: Any) -> List[Dict[str, Any]]:
         if len(nums) != 6:
             continue
         out.append({
-            "round": int(row["round_no"]),
+            "round": _safe_int(row["round_no"], 0),
             "date": row["draw_date"] or "",
             "numbers": nums,
-            "bonus": int(row["bonus"] or 0),
+            "bonus": _safe_int(row["bonus"], 0),
         })
     return out
 
@@ -102,7 +120,7 @@ def _rank(match_count: int, bonus_match: bool) -> str:
 
 def _evaluate(combos: Sequence[Sequence[int]], details: Sequence[Dict[str, Any]], target: Dict[str, Any]) -> Dict[str, Any]:
     win = set(target["numbers"])
-    bonus = int(target.get("bonus") or 0)
+    bonus = _safe_int(target.get("bonus"), 0)
     distribution = Counter()
     best_match = 0
     best_rank = "낙첨"
@@ -151,8 +169,8 @@ def create_run(c: Any, *, created_by: int, combo_count: int = DEFAULT_COMBO_COUN
         raise ValueError("백테스트를 실행하려면 유효한 당첨 회차가 최소 2개 필요합니다.")
     first_round = int(draws[0]["round"])
     last_round = int(draws[-1]["round"])
-    combo_count = max(1, min(50, int(combo_count or DEFAULT_COMBO_COUNT)))
-    min_history = max(1, int(min_history or DEFAULT_MIN_HISTORY))
+    combo_count = max(1, min(50, _safe_int(combo_count, DEFAULT_COMBO_COUNT)))
+    min_history = max(1, _safe_int(min_history, DEFAULT_MIN_HISTORY))
     start_round = first_round + 1
     eligible = [d for d in draws if int(d["round"]) >= start_round]
     cur = c.execute(
@@ -192,12 +210,12 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
     run = get_run(c, run_id)
     if run["status"] in {"completed", "cancelled"}:
         return {"run": run, "processed": 0, "done": run["status"] == "completed"}
-    step_size = max(1, min(MAX_STEP_SIZE, int(step_size or 1)))
+    step_size = max(1, min(MAX_STEP_SIZE, _safe_int(step_size, 1)))
     draws = load_draws(c)
     by_round = {int(d["round"]): d for d in draws}
     ordered = sorted(draws, key=lambda d: int(d["round"]))
     positions = {int(d["round"]): i for i, d in enumerate(ordered)}
-    target_rounds = [r for r in sorted(by_round) if int(r) >= int(run["next_round"]) and int(r) <= int(run["end_round"])][:step_size]
+    target_rounds = [r for r in sorted(by_round) if int(r) >= _safe_int(run.get("next_round"), _safe_int(run.get("start_round"), 1, minimum=1), minimum=1) and int(r) <= _safe_int(run.get("end_round"), 0, minimum=0)][:step_size]
     if not target_rounds:
         c.execute("UPDATE backtest_runs SET status='completed',completed_at=?,updated_at=? WHERE id=?", (_now(), _now(), int(run_id)))
         c.commit()
@@ -218,14 +236,14 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
         started = time.perf_counter()
         seed = f"{BACKTEST_VERSION}|run:{run_id}|round:{target_round}|mode:{run['mode']}|count:{run['combo_count']}|profile:{profile_label}"
         try:
-            if len(history) < int(run["min_history"]):
+            if len(history) < _safe_int(run.get("min_history"), 1, minimum=1):
                 status = "skipped"
                 error = f"이전 회차 {len(history)}개로 최소 이력 {run['min_history']}개를 충족하지 못했습니다."
                 skipped += 1
             else:
                 cache = build_backtest_cache(history)
                 combos, details, stats = make_premium_combos(
-                    int(run["combo_count"]),
+                    _safe_int(run.get("combo_count"), DEFAULT_COMBO_COUNT, minimum=1, maximum=50),
                     mode=run["mode"],
                     member_grade="일반",
                     cache_override=cache,
@@ -248,7 +266,7 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
             "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 int(run_id), int(target_round), int(history[0]["round"]) if history else 0, int(history[-1]["round"]) if history else 0, len(history), run["mode"], ENGINE_VERSION, seed,
-                json.dumps(target["numbers"], ensure_ascii=False), int(target.get("bonus") or 0),
+                json.dumps(target["numbers"], ensure_ascii=False), _safe_int(target.get("bonus"), 0),
                 json.dumps(result.get("recommended_numbers", []), ensure_ascii=False),
                 json.dumps({"combo_results": result.get("combo_results", []), "engine_stats": result.get("engine_stats", {})}, ensure_ascii=False),
                 int(result.get("best_match", 0)), result.get("best_rank", "낙첨"), json.dumps(result.get("match_distribution", {}), ensure_ascii=False),
@@ -265,7 +283,7 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
         c.commit()
 
     updated = get_run(c, run_id)
-    if int(updated["next_round"]) > int(updated["end_round"]):
+    if _safe_int(updated.get("next_round"), 1, minimum=1) > _safe_int(updated.get("end_round"), 0, minimum=0):
         c.execute("UPDATE backtest_runs SET status='completed',completed_at=?,updated_at=? WHERE id=?", (_now(), _now(), int(run_id)))
         c.commit()
         updated = get_run(c, run_id)
