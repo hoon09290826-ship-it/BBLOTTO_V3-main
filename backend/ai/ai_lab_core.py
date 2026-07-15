@@ -35,25 +35,21 @@ def _loads(value: Any, fallback: Any) -> Any:
         return fallback
 
 
-
-
-def safe_int(value: Any, default: int = 0, *, minimum: int | None = None, maximum: int | None = None) -> int:
-    """Convert nullable/legacy DB values to int without raising TypeError."""
-    try:
-        if value is None or value == "":
-            number = int(default)
-        else:
-            number = int(value)
-    except (TypeError, ValueError, OverflowError):
-        number = int(default)
-    if minimum is not None and number < minimum:
-        number = minimum
-    if maximum is not None and number > maximum:
-        number = maximum
-    return number
-
 def _row(row: Any) -> Dict[str, Any]:
     return dict(row) if row else {}
+
+
+def safe_int(value: Any, default: int = 0, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
+    """Convert nullable/invalid DB values to a bounded integer."""
+    try:
+        result = int(value) if value not in (None, "") else int(default)
+    except (TypeError, ValueError, OverflowError):
+        result = int(default)
+    if minimum is not None and result < minimum:
+        result = minimum
+    if maximum is not None and result > maximum:
+        result = maximum
+    return result
 
 
 def _fingerprint(weights: Dict[str, Any]) -> str:
@@ -117,8 +113,18 @@ def ensure_ai_lab_tables(c: Any) -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_ai_versions_status ON ai_engine_versions(status,id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ai_jobs_status ON ai_learning_jobs(status,id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ai_notes_job ON ai_learning_notes(job_id,id)")
-    # Repair rows created by older RC6-D1 builds where numeric defaults could remain NULL.
-    c.execute("UPDATE ai_learning_jobs SET target_rounds=COALESCE(target_rounds,0), processed_rounds=COALESCE(processed_rounds,0), candidate_limit=COALESCE(candidate_limit,12), random_seed=COALESCE(random_seed,0), base_version_id=COALESCE(base_version_id,0), profile_id=COALESCE(profile_id,0), best_candidate_version_id=COALESCE(best_candidate_version_id,0)")
+    # Older deployments may already contain NULL values despite column defaults.
+    c.execute(
+        "UPDATE ai_learning_jobs SET "
+        "base_version_id=COALESCE(base_version_id,0), profile_id=COALESCE(profile_id,0), "
+        "target_rounds=COALESCE(target_rounds,0), processed_rounds=COALESCE(processed_rounds,0), "
+        "candidate_limit=COALESCE(candidate_limit,12), random_seed=COALESCE(random_seed,0), "
+        "best_candidate_version_id=COALESCE(best_candidate_version_id,0), "
+        "config_json=COALESCE(NULLIF(config_json,''),'{}'), result_json=COALESCE(NULLIF(result_json,''),'{}'), "
+        "error_message=COALESCE(error_message,''), created_by=COALESCE(created_by,0), "
+        "created_at=COALESCE(created_at,''), started_at=COALESCE(started_at,''), "
+        "completed_at=COALESCE(completed_at,''), updated_at=COALESCE(updated_at,'')"
+    )
 
 
 def bootstrap(c: Any, *, engine_code_version: str, created_by: int = 0) -> Dict[str, Any]:
@@ -180,8 +186,11 @@ def _job_dict(row: Any) -> Dict[str, Any]:
     if item:
         item["config"] = _loads(item.pop("config_json", "{}"), {})
         item["result"] = _loads(item.pop("result_json", "{}"), {})
-        target = safe_int(item.get("target_rounds"), 1, minimum=1)
-        item["progress_percent"] = round(safe_int(item.get("processed_rounds"), 0, minimum=0) * 100 / target, 2)
+        target = safe_int(item.get("target_rounds"), 0, minimum=1)
+        processed = safe_int(item.get("processed_rounds"), 0, minimum=0)
+        item["target_rounds"] = safe_int(item.get("target_rounds"), 0, minimum=0)
+        item["processed_rounds"] = processed
+        item["progress_percent"] = round(min(processed, target) * 100 / target, 2)
     return item
 
 
