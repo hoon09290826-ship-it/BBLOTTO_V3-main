@@ -26,7 +26,7 @@ from .ai.score_engine import (
     triple_strength as _score_triple_strength,
 )
 
-ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_V13_04"
+ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_RC4_5"
 _ensure_ai_scheduler_started()
 _CACHE_LOCK = threading.RLock()
 _MEMORY_CACHE: Dict[str, Any] = {}
@@ -373,6 +373,80 @@ def _combo_evidence(nums: Sequence[int], detail: Dict[str, Any], cache: Dict[str
     }
 
 
+
+def _strategy_fit(combo: Sequence[int], detail: Dict[str, Any], cache: Dict[str, Any], strategy: str) -> Tuple[float, Dict[str, float]]:
+    """Return a transparent strategy bonus for the candidate combination.
+
+    Strategies do not bypass the common quality validator. They only change
+    the ordering among already valid candidates so the final portfolio is not
+    dominated by one style.
+    """
+    selected = set(int(n) for n in combo)
+    hot = set(int(n) for n in (cache.get("hot", []) or [])[:15])
+    overdue = set(int(n) for n in (cache.get("overdue", []) or [])[:15])
+    hot_count = len(selected & hot)
+    overdue_count = len(selected & overdue)
+    pair = float(detail.get("pair_strength", 0) or 0)
+    zones = list(detail.get("zones", [0, 0, 0]))
+    zone_balance = 1.0 - (max(zones) - min(zones)) / 6.0 if zones else 0.0
+    end_types = int(detail.get("end_types", 0) or 0)
+    momentum_map = cache.get("momentum", {}) or {}
+    momentum = sum(float(momentum_map.get(str(n), 0) or 0) for n in selected) / 6.0
+
+    components: Dict[str, float] = {}
+    if strategy == "최근 흐름형":
+        components["hot_bonus"] = min(8.0, hot_count * 2.0)
+        components["momentum_bonus"] = max(-2.0, min(5.0, momentum * 18.0))
+    elif strategy == "반등 혼합형":
+        components["overdue_bonus"] = min(8.0, overdue_count * 2.0)
+        components["balance_bonus"] = max(0.0, zone_balance * 3.0)
+    elif strategy == "동반출현형":
+        components["pair_bonus"] = min(9.0, pair * 1.8)
+        components["end_spread_bonus"] = min(2.5, max(0, end_types - 3) * 0.8)
+    else:  # 균형형
+        components["zone_balance_bonus"] = max(0.0, zone_balance * 5.0)
+        components["sum_center_bonus"] = max(0.0, 4.0 - abs(float(detail.get("sum", 138)) - 138.0) / 18.0)
+        components["end_spread_bonus"] = min(2.5, max(0, end_types - 3) * 0.8)
+    return round(sum(components.values()), 4), {k: round(v, 4) for k, v in components.items()}
+
+
+def _portfolio_adjustment(
+    combo: Sequence[int],
+    selected: Sequence[Sequence[int]],
+    usage: Counter,
+    target: int,
+) -> Tuple[float, Dict[str, float]]:
+    """Score portfolio diversity without weakening combination validity."""
+    overlap = max((len(set(combo) & set(prev)) for prev in selected), default=0)
+    soft_cap = max(2, math.ceil(target * 6 / 45) + 1)
+    repeat_excess = sum(max(0, usage[int(n)] + 1 - soft_cap) for n in combo)
+    repeat_penalty = repeat_excess * 4.2
+    overlap_penalty = {0: 0.0, 1: 0.0, 2: 0.6, 3: 4.5, 4: 11.0}.get(overlap, 18.0)
+
+    # Reward numbers not yet represented and underrepresented zones.
+    new_number_bonus = sum(1 for n in combo if usage[int(n)] == 0) * 0.7
+    existing_zone_usage = [0, 0, 0]
+    for n, count in usage.items():
+        zone = 0 if n <= 15 else 1 if n <= 30 else 2
+        existing_zone_usage[zone] += int(count)
+    zone_bonus = 0.0
+    if selected:
+        min_zone = min(existing_zone_usage)
+        for n in combo:
+            zone = 0 if n <= 15 else 1 if n <= 30 else 2
+            if existing_zone_usage[zone] == min_zone:
+                zone_bonus += 0.35
+
+    adjustment = new_number_bonus + zone_bonus - repeat_penalty - overlap_penalty
+    return round(adjustment, 4), {
+        "new_number_bonus": round(new_number_bonus, 4),
+        "zone_coverage_bonus": round(zone_bonus, 4),
+        "number_repeat_penalty": round(repeat_penalty, 4),
+        "combo_overlap_penalty": round(overlap_penalty, 4),
+        "max_previous_overlap": float(overlap),
+        "usage_soft_cap": float(soft_cap),
+    }
+
 def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None):
     started = time.perf_counter()
     target = max(1, min(50, int(count or 10)))
@@ -405,30 +479,38 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
     selected: List[List[int]] = []
     selected_details: List[Dict[str, Any]] = []
     usage: Counter = Counter()
-    for combo, (base_score, detail) in ranked:
-        if len(selected) >= target:
+    strategy_cycle = ["균형형", "최근 흐름형", "반등 혼합형", "동반출현형"]
+    candidate_rank = {combo: index + 1 for index, (combo, _) in enumerate(ranked)}
+    available = {combo: (score, detail) for combo, (score, detail) in ranked}
+
+    # Pick each combination against the portfolio already selected. This avoids
+    # simply taking the highest six-number scores repeatedly.
+    while len(selected) < target and available:
+        strategy = strategy_cycle[len(selected) % len(strategy_cycle)]
+        best = None
+        for combo, (base_score, detail) in list(available.items()):
+            overlap = max((len(set(combo) & set(prev)) for prev in selected), default=0)
+            if overlap >= 5:
+                continue
+            strategy_bonus, strategy_components = _strategy_fit(combo, detail, cache, strategy)
+            portfolio_adjustment, portfolio_components = _portfolio_adjustment(combo, selected, usage, target)
+            final_score = float(base_score) + strategy_bonus + portfolio_adjustment
+            candidate = (final_score, float(base_score), tuple(combo), detail, strategy_bonus, strategy_components, portfolio_adjustment, portfolio_components)
+            if best is None or candidate[:3] > best[:3]:
+                best = candidate
+        if best is None:
             break
-        overlap = max((len(set(combo) & set(prev)) for prev in selected), default=0)
-        if overlap >= 5:
-            continue
-        diversity_penalty = sum(max(0, usage[n] - max(1, target // 5)) for n in combo) * 3.2
-        adjusted = base_score - diversity_penalty - max(0, overlap - 2) * 4.5
-        # 후보 상위권 안에서 포트폴리오 점수로 재평가
-        if selected and adjusted < ranked[min(len(ranked)-1, target*8)][1][0] - 18:
-            continue
+
+        final_score, base_score, combo, detail, strategy_bonus, strategy_components, portfolio_adjustment, portfolio_components = best
+        available.pop(combo, None)
         selected.append(list(combo))
         usage.update(combo)
-        archetype = "강세 균형형"
+
         hot_count = len(set(combo) & set(cache.get("hot", [])[:12]))
         overdue_count = len(set(combo) & set(cache.get("overdue", [])[:12]))
-        if overdue_count >= 2: archetype = "반등 혼합형"
-        elif hot_count >= 3: archetype = "최근 흐름형"
-        elif detail["pair_strength"] >= 2.5: archetype = "동반출현형"
+        pair_strength = float(detail.get("pair_strength", 0) or 0)
         evidence = [_number_evidence(n, cache, weights) for n in combo]
 
-        # 최종 선택 조합과 가장 가까운 상위 대체 후보를 함께 저장합니다.
-        # 설명 엔진은 이 값을 사용해 “다른 후보 대신 왜 이 조합이 선택됐는지”를
-        # 실제 점수 차이와 교체 번호 기준으로 설명합니다.
         alternative = None
         for alt_combo, (alt_score, alt_detail) in ranked:
             if alt_combo == combo:
@@ -453,25 +535,38 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             break
 
         reasons = [
-            f"최근·중기·전체 출현 흐름과 미출현 간격을 종합한 {archetype}",
+            f"{strategy} 기준으로 번호 점수와 조합 구조를 함께 재평가",
             f"홀짝 {detail['odd']}:{detail['even']} · 구간 {detail['zones'][0]}-{detail['zones'][1]}-{detail['zones'][2]} · 합계 {detail['sum']}",
-            f"AC {detail['ac']} · 끝수 {detail['end_types']}종 · 최근 당첨조합 최대 중복 {detail['max_recent_overlap']}개",
+            f"AC {detail['ac']} · 동반출현 {pair_strength:.2f} · 최근 당첨조합 최대 중복 {detail['max_recent_overlap']}개",
         ]
         selected_details.append({
-            "numbers": list(combo), "score": round(adjusted, 2), "base_score": round(base_score, 2),
-            "diversity_penalty": round(diversity_penalty, 2), "overlap_penalty": round(max(0, overlap - 2) * 4.5, 2),
-            "max_previous_overlap": overlap, "selection_rank": len(selected),
+            "numbers": list(combo), "score": round(final_score, 2), "base_score": round(base_score, 2),
+            "strategy_bonus": round(strategy_bonus, 2), "portfolio_adjustment": round(portfolio_adjustment, 2),
+            "diversity_penalty": round(portfolio_components["number_repeat_penalty"], 2),
+            "overlap_penalty": round(portfolio_components["combo_overlap_penalty"], 2),
+            "max_previous_overlap": int(portfolio_components["max_previous_overlap"]),
+            "selection_rank": len(selected), "candidate_rank": candidate_rank.get(combo),
             "engine_version": ENGINE_VERSION, "engine": ENGINE_VERSION,
-            "type": archetype, "strategy": archetype, "portfolio_type": archetype,
+            "type": strategy, "strategy": strategy, "portfolio_type": strategy,
             "number_evidence": evidence, "alternative_candidate": alternative,
             "combo_evidence": _combo_evidence(combo, detail, cache, weights),
+            "score_components": {
+                "base_combo_score": round(base_score, 4),
+                "strategy_bonus": round(strategy_bonus, 4),
+                "portfolio_adjustment": round(portfolio_adjustment, 4),
+                "strategy": strategy_components,
+                "portfolio": portfolio_components,
+                "hot_count": hot_count, "overdue_count": overdue_count,
+            },
             "selection_trace": {
                 "candidate_base_score": round(base_score, 2),
-                "portfolio_score": round(adjusted, 2),
-                "number_repeat_penalty": round(diversity_penalty, 2),
-                "combo_overlap_penalty": round(max(0, overlap - 2) * 4.5, 2),
-                "max_previous_overlap": overlap,
-                "candidate_rank": next((i + 1 for i, item in enumerate(ranked) if item[0] == combo), None),
+                "portfolio_score": round(final_score, 2),
+                "strategy_bonus": round(strategy_bonus, 2),
+                "number_repeat_penalty": round(portfolio_components["number_repeat_penalty"], 2),
+                "combo_overlap_penalty": round(portfolio_components["combo_overlap_penalty"], 2),
+                "max_previous_overlap": int(portfolio_components["max_previous_overlap"]),
+                "candidate_rank": candidate_rank.get(combo),
+                "strategy": strategy,
             },
             "reasons": reasons, "reason": " / ".join(reasons), **detail,
         })
@@ -565,7 +660,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         "generation_ms": elapsed, "candidate_count": len(pool), "attempts": attempts,
         "hot": cache.get("hot", [])[:12], "cold": cache.get("cold", [])[:12], "overdue": cache.get("overdue", [])[:12],
         "unique_numbers": len(usage), "max_number_use": max(usage.values(), default=0),
-        "methodology": ["AI-01 영구 캐시 기반", "1회차~최신 회차 전체 분석", "최근 10·30·50·100·300회 다중 가중치", "미출현 간격·모멘텀", "동반출현·트리플", "홀짝·구간·합계·AC·끝수", "조합 간 중복 억제"],
+        "methodology": ["AI-01 영구 캐시 기반", "1회차~최신 회차 전체 분석", "최근 10·30·50·100·300회 다중 가중치", "미출현 간격·모멘텀", "동반출현·트리플", "홀짝·구간·합계·AC·끝수", "조합 간 중복 억제", "전략별 포트폴리오 재평가", "번호 반복·구간 편중 동적 보정"],
     }
     return selected[:target], selected_details[:target], stats
 
