@@ -130,146 +130,221 @@ def save_draw(req:DrawReq, request:Request, authorization: str|None = Header(def
 
 
 def _auto_check_round(admin, req:AutoWinReq, request:Request):
+    """회원별로 명시 저장된 추천 조합만 당첨 확인합니다.
+
+    같은 회원의 동일 조합은 추천 이력/SMS 이력에 여러 번 존재해도 한 번만
+    계산하며, 해당 회차의 기존 결과는 관리자 권한 범위 안에서 먼저 정리한 뒤
+    현재 저장 조합으로 다시 작성합니다.
+    """
     if not int(req.round_no or 0):
         req.round_no = expected_lotto_round()
-    wins=parse_nums(req.winning)
+
+    wins = parse_nums(req.winning)
     resolved = None
-    # PHASE20: 당첨번호를 입력하지 않아도 회차 기준으로 자동 조회/저장 후 확인합니다.
-    if len(wins)!=6 or not int(req.bonus or 0):
+    if len(wins) != 6 or not int(req.bonus or 0):
         resolved = resolve_draw_for_check(req.round_no, allow_fetch=True)
         if resolved.get('numbers') and resolved.get('bonus'):
             wins = parse_nums(resolved.get('numbers'))
             req.bonus = int(resolved.get('bonus') or 0)
-            req.draw_date = req.draw_date or resolved.get('draw_date','')
+            req.draw_date = req.draw_date or resolved.get('draw_date', '')
         else:
             raise HTTPException(400, resolved.get('message') or '당첨번호가 아직 자동 확인되지 않았습니다.')
-    if len(wins)!=6:
-        raise HTTPException(400,'당첨번호 6개를 입력하세요.')
+
+    if len(wins) != 6 or len(set(wins)) != 6 or any(n < 1 or n > 45 for n in wins):
+        raise HTTPException(400, '당첨번호는 1~45 사이의 서로 다른 숫자 6개여야 합니다.')
     if not (1 <= int(req.bonus) <= 45):
-        raise HTTPException(400,'보너스 번호를 입력하세요.')
+        raise HTTPException(400, '보너스 번호를 입력하세요.')
     if int(req.bonus) in wins:
-        raise HTTPException(400,'보너스 번호는 당첨번호 6개와 달라야 합니다.')
-    # RC3-15: 당첨확인 저장 회차는 반드시 실제 추첨 완료 회차까지만 허용합니다.
-    req.round_no, wins, req.bonus, expected_round, completed_round = _rc315_validate_draw_payload(req.round_no, wins, req.bonus, allow_completed_only=True)
+        raise HTTPException(400, '보너스 번호는 당첨번호 6개와 달라야 합니다.')
+
+    req.round_no, wins, req.bonus, expected_round, completed_round = _rc315_validate_draw_payload(
+        req.round_no, wins, req.bonus, allow_completed_only=True
+    )
+    wins = sorted(wins)
+    rank_order = {'1등': 1, '2등': 2, '3등': 3, '4등': 4, '5등': 5, '낙첨': 9}
+
+    def normalize_saved_combos(raw):
+        try:
+            value = json.loads(raw or '[]') if isinstance(raw, str) else raw
+        except Exception:
+            return []
+        if not isinstance(value, list):
+            return []
+        if len(value) == 6 and all(isinstance(x, (int, float, str)) for x in value):
+            value = [value]
+        out = []
+        for item in value:
+            nums = sorted(parse_nums(item))
+            if len(nums) != 6 or len(set(nums)) != 6 or any(n < 1 or n > 45 for n in nums):
+                continue
+            out.append(nums)
+        return out
+
     with con() as c:
         _rc315_clean_future_draws_in_conn(c)
-        c.execute('INSERT OR REPLACE INTO draws(round_no,draw_date,numbers,bonus,source,updated_at) VALUES(?,?,?,?,?,?)', (req.round_no, req.draw_date or draw_date_for_round(req.round_no), json.dumps(wins), int(req.bonus), (resolved.get('source') if resolved else 'manual_auto'), now()))
-        # RC4-4 개선: 공동추천/회원 미지정 추천은 당첨확인 결과에서 제외하고, 회원별로 묶어서 확인합니다.
-        rec_where = 'r.round_no=? AND COALESCE(r.member_id,0)>0 AND COALESCE(r.explicit_saved,0)=1'
-        rec_args = [req.round_no]
+        c.execute(
+            'INSERT OR REPLACE INTO draws(round_no,draw_date,numbers,bonus,source,updated_at) VALUES(?,?,?,?,?,?)',
+            (req.round_no, req.draw_date or draw_date_for_round(req.round_no), json.dumps(wins),
+             int(req.bonus), (resolved.get('source') if resolved else 'manual_auto'), now())
+        )
+
+        scope_sql = ''
+        scope_args = []
         if not is_super_admin(admin):
-            rec_where += ' AND COALESCE(m.created_by,0)=?'
-            rec_args.append(int(admin.get('id') or 0))
-        recs = [dict(r) for r in c.execute(f'''
-            SELECT r.id,
+            scope_sql = ' AND COALESCE(m.created_by,0)=?'
+            scope_args = [int(admin.get('id') or 0)]
+
+        rec_rows = [dict(r) for r in c.execute(f'''
+            SELECT r.id AS source_id, 'recommendation' AS source_type,
                    r.member_id,
-                   COALESCE(NULLIF(r.member_name,''), m.name, '회원명 미확인') AS member_name,
-                   r.round_no,
+                   COALESCE(NULLIF(r.member_name,''),m.name,'회원명 미확인') AS member_name,
                    r.numbers
             FROM recommendations r
-            INNER JOIN members m ON m.id = r.member_id
-            WHERE {rec_where}
-            ORDER BY m.name ASC, r.id DESC
-        ''', rec_args).fetchall()]
+            INNER JOIN members m ON m.id=r.member_id
+            WHERE r.round_no=?
+              AND COALESCE(r.member_id,0)>0
+              AND COALESCE(r.explicit_saved,0)=1
+              {scope_sql}
+            ORDER BY m.name ASC,r.id DESC
+        ''', [req.round_no, *scope_args]).fetchall()]
 
-        # RC8.19: 기존 버전에서 '복사저장/보낸문자 저장/문구이력 저장'으로 남긴 번호도
-        # 당첨확인 대상으로 복구합니다. sms_logs.combos가 비어 있지 않은 기록만 사용하며,
-        # 추천번호 저장 기록과 같은 조합은 회원별로 중복 제거합니다.
-        sms_where = "s.round_no=? AND COALESCE(s.member_id,0)>0 AND COALESCE(s.combos,'') NOT IN ('','[]')"
-        sms_args = [req.round_no]
-        if not is_super_admin(admin):
-            sms_where += ' AND COALESCE(m.created_by,0)=?'
-            sms_args.append(int(admin.get('id') or 0))
-        sms_rows = c.execute(f'''
-            SELECT s.id, s.member_id,
-                   COALESCE(NULLIF(s.member_name,''), m.name, '회원명 미확인') AS member_name,
-                   s.round_no, s.combos AS numbers
+        sms_rows = [dict(r) for r in c.execute(f'''
+            SELECT s.id AS source_id, 'sms' AS source_type,
+                   s.member_id,
+                   COALESCE(NULLIF(s.member_name,''),m.name,'회원명 미확인') AS member_name,
+                   s.combos AS numbers
             FROM sms_logs s
             INNER JOIN members m ON m.id=s.member_id
-            WHERE {sms_where}
-            ORDER BY m.name ASC, s.id DESC
-        ''', sms_args).fetchall()
-        recs.extend({
-            'id': -int(r['id'] or 0), 'member_id': r['member_id'],
-            'member_name': r['member_name'], 'round_no': r['round_no'],
-            'numbers': r['numbers']
-        } for r in sms_rows)
+            WHERE s.round_no=?
+              AND COALESCE(s.member_id,0)>0
+              AND COALESCE(s.combos,'') NOT IN ('','[]')
+              {scope_sql}
+            ORDER BY m.name ASC,s.id DESC
+        ''', [req.round_no, *scope_args]).fetchall()]
 
-        deduped_recs=[]
-        seen_saved=set()
-        for rec in recs:
-            try:
-                parsed=[parse_nums(x) for x in json.loads(rec.get('numbers') or '[]')]
-                parsed=[x for x in parsed if len(x)==6]
-            except Exception:
-                parsed=[]
-            if not parsed:
+        combo_records = []
+        seen_combo = set()
+        source_keys_by_member = {}
+        member_names = {}
+        for row in [*rec_rows, *sms_rows]:
+            mid = int(row.get('member_id') or 0)
+            if mid <= 0:
                 continue
-            canonical=json.dumps(parsed, ensure_ascii=False, separators=(',',':'))
-            key=(int(rec.get('member_id') or 0), canonical)
-            if key in seen_saved:
-                continue
-            seen_saved.add(key)
-            rec['numbers']=json.dumps(parsed, ensure_ascii=False)
-            deduped_recs.append(rec)
-        recs=deduped_recs
+            member_names[mid] = row.get('member_name') or '회원명 미확인'
+            valid_combos = normalize_saved_combos(row.get('numbers'))
+            if valid_combos:
+                source_keys_by_member.setdefault(mid, set()).add((row.get('source_type'), int(row.get('source_id') or 0)))
+            for combo in valid_combos:
+                key = (mid, tuple(combo))
+                if key in seen_combo:
+                    continue
+                seen_combo.add(key)
+                combo_records.append({
+                    'member_id': mid,
+                    'member_name': member_names[mid],
+                    'combo': combo,
+                    'source_id': int(row.get('source_id') or 0),
+                    'source_type': row.get('source_type') or 'recommendation',
+                })
 
-        # 과거 '생성만 한 조합'으로 만들어진 당첨확인 결과를 같은 회차/회원 기준으로 정리합니다.
-        explicit_member_ids=sorted({int(r['member_id'] or 0) for r in recs if int(r['member_id'] or 0)>0})
-        if explicit_member_ids:
-            marks=','.join(['?']*len(explicit_member_ids))
-            c.execute(f'DELETE FROM winning_checks WHERE round_no=? AND member_id IN ({marks})', [req.round_no, *explicit_member_ids])
-        checked=[]
-        member_map={}
-        rank_order={'1등':1,'2등':2,'3등':3,'4등':4,'5등':5,'낙첨':9}
-        for rec in recs:
-            try:
-                combos=json.loads(rec['numbers'] or '[]')
-            except Exception:
-                combos=[]
-            mid=int(rec['member_id'] or 0)
-            mname=rec['member_name'] or '회원명 미확인'
-            group=member_map.setdefault(mid, {
+        if is_super_admin(admin):
+            c.execute('DELETE FROM winning_checks WHERE round_no=? AND COALESCE(member_id,0)>0', (req.round_no,))
+        else:
+            c.execute('''
+                DELETE FROM winning_checks
+                WHERE round_no=? AND member_id IN (
+                    SELECT id FROM members WHERE COALESCE(created_by,0)=?
+                )
+            ''', (req.round_no, int(admin.get('id') or 0)))
+
+        checked = []
+        member_map = {}
+        for record in combo_records:
+            mid = record['member_id']
+            mname = record['member_name']
+            group = member_map.setdefault(mid, {
                 'member_id': mid,
                 'member_name': mname,
-                'recommendation_count': 0,
+                'recommendation_count': len(source_keys_by_member.get(mid, set())),
                 'total_combos': 0,
                 'hit_count': 0,
                 'lose_count': 0,
                 'total_prize': 0,
                 'best_rank': '낙첨',
                 'best_prize': 0,
-                'combos': []
+                'combos': [],
             })
-            if combos:
-                group['recommendation_count'] += 1
-            for idx, combo in enumerate(combos, start=1):
-                r=rank_result(combo, wins, int(req.bonus))
-                target=json.dumps(r['combo'], ensure_ascii=False)
-                old=c.execute('SELECT id FROM winning_checks WHERE round_no=? AND COALESCE(member_id,0)=COALESCE(?,0) AND target_numbers=? AND win_numbers=? AND bonus=?', (req.round_no, rec['member_id'], target, json.dumps(wins), int(req.bonus))).fetchone()
-                if old:
-                    c.execute('UPDATE winning_checks SET member_name=?, match_count=?, bonus_match=?, rank=?, prize=?, cost=?, profit=?, roi=?, created_by=?, created_at=? WHERE id=?', (mname, r['match_count'], int(r['bonus_match']), r['rank'], r['prize'], r['cost'], r['profit'], r['roi'], admin['id'], now(), old['id']))
-                else:
-                    c.execute('INSERT INTO winning_checks(member_id,member_name,round_no,target_numbers,win_numbers,bonus,match_count,bonus_match,rank,prize,cost,profit,roi,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (rec['member_id'], mname, req.round_no, target, json.dumps(wins), int(req.bonus), r['match_count'], int(r['bonus_match']), r['rank'], r['prize'], r['cost'], r['profit'], r['roi'], admin['id'], now()))
-                item={'member_id':mid, 'member_name':mname, 'recommendation_id':rec['id'], 'combo_index':idx, **r}
-                checked.append(item)
-                group['total_combos'] += 1
-                group['total_prize'] += int(r.get('prize') or 0)
-                if r.get('rank') and r.get('rank') != '낙첨':
-                    group['hit_count'] += 1
-                else:
-                    group['lose_count'] += 1
-                if rank_order.get(r.get('rank','낙첨'),9) < rank_order.get(group['best_rank'],9):
-                    group['best_rank'] = r.get('rank') or '낙첨'
-                    group['best_prize'] = int(r.get('prize') or 0)
-                group['combos'].append(item)
+            result = rank_result(record['combo'], wins, int(req.bonus))
+            target = json.dumps(result['combo'], ensure_ascii=False)
+            c.execute('''
+                INSERT INTO winning_checks(
+                    member_id,member_name,round_no,target_numbers,win_numbers,bonus,
+                    match_count,bonus_match,rank,prize,cost,profit,roi,created_by,created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (
+                mid, mname, req.round_no, target, json.dumps(wins), int(req.bonus),
+                result['match_count'], int(result['bonus_match']), result['rank'],
+                result['prize'], result['cost'], result['profit'], result['roi'],
+                admin['id'], now()
+            ))
+            item = {
+                'member_id': mid,
+                'member_name': mname,
+                'recommendation_id': record['source_id'],
+                'source_type': record['source_type'],
+                'combo_index': group['total_combos'] + 1,
+                **result,
+            }
+            checked.append(item)
+            group['total_combos'] += 1
+            group['total_prize'] += int(result.get('prize') or 0)
+            if result.get('rank') and result.get('rank') != '낙첨':
+                group['hit_count'] += 1
+            else:
+                group['lose_count'] += 1
+            if rank_order.get(result.get('rank', '낙첨'), 9) < rank_order.get(group['best_rank'], 9):
+                group['best_rank'] = result.get('rank') or '낙첨'
+                group['best_prize'] = int(result.get('prize') or 0)
+            group['combos'].append(item)
         c.commit()
-    member_results=list(member_map.values())
-    member_results.sort(key=lambda x: (rank_order.get(x.get('best_rank','낙첨'),9), -int(x.get('total_prize') or 0), x.get('member_name') or ''))
-    summary={'members':len(member_results), 'recommendations':len(recs), 'checked_combos':len(checked), 'hit_members':sum(1 for m in member_results if m.get('hit_count',0)>0), 'hit_combos':sum(1 for x in checked if x.get('rank')!='낙첨'), 'lose_combos':sum(1 for x in checked if x.get('rank')=='낙첨'), 'prize':sum(x['prize'] for x in checked), 'cost':sum(x['cost'] for x in checked), 'profit':sum(x['profit'] for x in checked)}
-    summary['roi']=round((summary['profit']/summary['cost']*100),2) if summary['cost'] else 0
-    log_action(admin,'AUTO_WIN_CHECK',f'{req.round_no}회차 회원별 자동 당첨확인 {len(member_results)}명/{len(checked)}조합',request)
-    return {'ok':True, 'round_no':req.round_no, 'wins':wins, 'bonus':int(req.bonus), 'draw_date':req.draw_date, 'auto_resolved': bool(resolved), 'summary':summary, 'member_results':member_results, 'results':checked[:300]}
+
+    member_results = list(member_map.values())
+    member_results.sort(key=lambda x: (
+        rank_order.get(x.get('best_rank', '낙첨'), 9),
+        -int(x.get('total_prize') or 0),
+        x.get('member_name') or ''
+    ))
+    hit_combos = sum(1 for x in checked if x.get('rank') != '낙첨')
+    summary = {
+        'members': len(member_results),
+        'recommendations': sum(len(v) for v in source_keys_by_member.values()),
+        'checked_combos': len(checked),
+        'hit_members': sum(1 for m in member_results if m.get('hit_count', 0) > 0),
+        'hit_combos': hit_combos,
+        'lose_combos': len(checked) - hit_combos,
+        'prize': sum(x['prize'] for x in checked),
+        'cost': sum(x['cost'] for x in checked),
+        'profit': sum(x['profit'] for x in checked),
+    }
+    summary['roi'] = round((summary['profit'] / summary['cost'] * 100), 2) if summary['cost'] else 0
+    log_action(
+        admin, 'AUTO_WIN_CHECK',
+        f'{req.round_no}회차 회원별 자동 당첨확인 {len(member_results)}명/{len(checked)}조합',
+        request
+    )
+    return {
+        'ok': True,
+        'round_no': req.round_no,
+        'wins': wins,
+        'bonus': int(req.bonus),
+        'draw_date': req.draw_date,
+        'auto_resolved': bool(resolved),
+        'summary': summary,
+        'member_results': member_results,
+        'results': checked[:300],
+        'message': (f'{req.round_no}회 회원 {len(member_results)}명, '
+                    f'저장 조합 {len(checked)}개를 확인했습니다.')
+    }
 
 @router.post('/api/check_winning')
 def check_winning_alias(req:AutoWinReq, request:Request, authorization: str|None = Header(default=None)):

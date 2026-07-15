@@ -187,7 +187,7 @@ function renderWinningResult(d){
     </tr>`).join('');
     return `<div class="win-member-card">
       <div class="win-member-row">
-        <div class="win-member-name"><b>${esc(m.member_name||'회원명 미확인')}</b><small>${esc(m.total_combos||0)}조합 확인</small></div>
+        <div class="win-member-name"><b>${esc(m.member_name||'회원명 미확인')}</b><small>${esc(m.total_combos||0)}조합 · 당첨 ${esc(m.hit_count||0)} · 낙첨 ${esc(m.lose_count||0)} · 최고 ${esc(best)}</small></div>
         <div><b>${esc(m.hit_count||0)}</b><small>당첨</small></div>
         <div><b>${esc(m.lose_count||0)}</b><small>낙첨</small></div>
         <div><span class="rank-badge ${rankBadgeClass(best)}">${esc(best)}</span><small>최고당첨</small></div>
@@ -202,7 +202,7 @@ function renderWinningResult(d){
   }).join('');
   box.innerHTML=`<div class="result-summary rc44-win-summary"><b>${esc(d.round_no || d.round)}회차 회원별 자동 확인 완료</b><br>
     회원 ${summary.members||list.length||0}명 / 추천 ${summary.recommendations||0}건 / 조합 ${summary.checked_combos||0}개 / 당첨조합 ${summary.hit_combos||0}개 / 낙첨조합 ${summary.lose_combos||0}개 / 총 당첨금 ${Number(summary.prize||0).toLocaleString()}원</div>
-    <div class="win-member-list">${rows||'<div class="empty-detail">해당 회차 회원별 추천 이력이 없습니다.</div>'}</div><div id="winCheckPager" class="pager"></div>`;
+    <div class="win-member-list">${rows||'<div class="empty-detail">해당 회차에 회원이 직접 저장한 추천번호가 없습니다. 미리보기 번호나 공동추천 번호는 당첨확인 대상에 포함되지 않습니다.</div>'}</div><div id="winCheckPager" class="pager"></div>`;
   renderPagination('winCheckPager', list.length, winCheckPage, winCheckPageSize, 'setWinCheckPage', 'setWinCheckPageSize');
 }
 function openPanel(tabId, title){

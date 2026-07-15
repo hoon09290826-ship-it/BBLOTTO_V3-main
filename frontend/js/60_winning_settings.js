@@ -43,7 +43,7 @@ async function checkWinning(){
     const d=await api('/api/check_winning',{method:'POST',body});
     if(d.wins?.length){ if($('winningNums')) $('winningNums').value=d.wins.join(' '); if($('bonusNum')) $('bonusNum').value=d.bonus||''; }
     renderWinningResult(d);
-    toast('당첨번호 자동확인이 완료되었습니다.');
+    toast(d.message || '당첨번호 자동확인이 완료되었습니다.');
     await Promise.all([loadStats(0),loadDraws(),loadDashboard(),setNextDrawRound()]);
   }catch(e){
     const msg = e?.message || '당첨번호 자동확인에 실패했습니다.';
