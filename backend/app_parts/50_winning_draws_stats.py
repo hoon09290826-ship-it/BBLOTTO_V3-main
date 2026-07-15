@@ -283,60 +283,84 @@ def win_check_auto(req:AutoWinReq, request:Request, authorization: str|None = He
 
 @router.get('/api/stats')
 def api_stats(limit:int=100, authorization: str|None = Header(default=None)):
+    """당첨번호 원본 DB를 기준으로 기간별 통계를 계산합니다.
+
+    limit=0이면 1회차부터 최신 저장 회차까지 전체를 분석하고,
+    limit>0이면 최신 N개 유효 회차만 분석합니다. 전체 이력의 누락/유효성
+    상태는 선택 기간과 별도로 계산하여 화면에 일관되게 전달합니다.
+    """
     require_admin(authorization)
+    try:
+        requested = int(limit or 0)
+    except Exception:
+        raise HTTPException(400, '통계 범위는 숫자로 입력하세요.')
+    if requested < 0:
+        raise HTTPException(400, '통계 범위는 0 이상이어야 합니다.')
+    requested = min(requested, 5000)
 
-    # 통계 화면은 추천엔진 캐시가 아니라 draws 원본 DB를 직접 사용합니다.
-    # 95_engine_runtime.py가 latest_stats를 캐시 함수로 재정의하더라도
-    # 회차 목록/빈도/동반출현 데이터가 사라지지 않도록 독립 처리합니다.
-    requested = int(limit or 0)
     with con() as c:
-        if requested > 0:
-            rows = c.execute(
-                'SELECT round_no,draw_date,numbers,bonus FROM draws ORDER BY round_no DESC LIMIT ?',
-                (max(1, requested),)
-            ).fetchall()
-        else:
-            rows = c.execute(
-                'SELECT round_no,draw_date,numbers,bonus FROM draws ORDER BY round_no DESC'
-            ).fetchall()
+        raw_rows = c.execute(
+            'SELECT round_no,draw_date,numbers,bonus FROM draws ORDER BY round_no DESC'
+        ).fetchall()
 
-    draws=[]
-    for r in rows:
-        nums=parse_nums(r['numbers'])
-        if len(nums)==6:
-            draws.append({
-                'round_no':int(r['round_no']),
-                'draw_date':r['draw_date'] or '',
-                'numbers':nums,
-                'bonus':int(r['bonus'] or 0),
-            })
+    # 같은 회차가 중복되어 있어도 최신 조회 행 하나만 사용합니다.
+    all_draws=[]
+    invalid_rows=[]
+    seen_rounds=set()
+    for r in raw_rows:
+        try:
+            round_no=int(r['round_no'] or 0)
+            nums=sorted(parse_nums(r['numbers']))
+            bonus=int(r['bonus'] or 0)
+        except Exception:
+            invalid_rows.append(int(r['round_no'] or 0) if r['round_no'] else 0)
+            continue
+        valid=(round_no>=1 and len(nums)==6 and len(set(nums))==6
+               and all(1<=n<=45 for n in nums)
+               and 1<=bonus<=45 and bonus not in nums)
+        if not valid:
+            invalid_rows.append(round_no)
+            continue
+        if round_no in seen_rounds:
+            continue
+        seen_rounds.add(round_no)
+        all_draws.append({
+            'round_no':round_no,
+            'draw_date':r['draw_date'] or '',
+            'numbers':nums,
+            'bonus':bonus,
+        })
+
+    all_draws.sort(key=lambda d:d['round_no'], reverse=True)
+    draws = all_draws[:requested] if requested > 0 else all_draws
 
     nums=[n for d in draws for n in d['numbers']]
     sums=[sum(d['numbers']) for d in draws]
     freq={n:0 for n in range(1,46)}
     for n in nums:
-        if 1 <= int(n) <= 45:
-            freq[int(n)] += 1
+        freq[n] += 1
 
-    last_seen={n:999999 for n in range(1,46)}
+    last_seen={n:None for n in range(1,46)}
     for idx,d in enumerate(draws):
         for n in d['numbers']:
-            if last_seen[n] == 999999:
-                last_seen[n] = idx
+            if last_seen[n] is None:
+                last_seen[n]=idx
+    # 선택 범위에서 한 번도 나오지 않은 번호는 범위 길이로 표시합니다.
+    gap={n:(last_seen[n] if last_seen[n] is not None else len(draws)) for n in range(1,46)}
 
-    weighted={}
     recent10=draws[:10]
     recent30=draws[:30]
     recent100=draws[:100]
+    weighted={}
     for n in range(1,46):
         f10=sum(n in d['numbers'] for d in recent10)
         f30=sum(n in d['numbers'] for d in recent30)
         f100=sum(n in d['numbers'] for d in recent100)
-        weighted[n]=f10*2.4 + f30*1.35 + f100*0.65
+        weighted[n]=round(f10*2.4 + f30*1.35 + f100*0.65, 4)
 
-    hot=sorted(range(1,46), key=lambda n:(-weighted[n], last_seen[n], n))[:15]
-    cold=sorted(range(1,46), key=lambda n:(freq[n], -last_seen[n], n))[:15]
-    overdue=sorted(range(1,46), key=lambda n:(-last_seen[n], freq[n], n))[:15]
+    hot=sorted(range(1,46), key=lambda n:(-weighted[n], gap[n], -freq[n], n))[:15]
+    cold=sorted(range(1,46), key=lambda n:(freq[n], -gap[n], weighted[n], n))[:15]
+    overdue=sorted(range(1,46), key=lambda n:(-gap[n], freq[n], n))[:15]
 
     sections=[
         sum(1 for n in nums if n<=15),
@@ -353,37 +377,67 @@ def api_stats(limit:int=100, authorization: str|None = Header(default=None)):
     count=len(draws)
     latest_round=draws[0]['round_no'] if draws else 0
     oldest_round=draws[-1]['round_no'] if draws else 0
-    expected_count=(latest_round-oldest_round+1) if latest_round and oldest_round else 0
-    existing_rounds={d['round_no'] for d in draws}
-    missing_count=(sum(1 for r in range(oldest_round, latest_round+1) if r not in existing_rounds)
-                   if expected_count else 0)
+
+    full_latest=all_draws[0]['round_no'] if all_draws else 0
+    full_oldest=all_draws[-1]['round_no'] if all_draws else 0
+    full_expected=(full_latest-full_oldest+1) if full_latest and full_oldest else 0
+    full_rounds={d['round_no'] for d in all_draws}
+    missing_rounds=(
+        [r for r in range(full_oldest, full_latest+1) if r not in full_rounds]
+        if full_expected else []
+    )
+    full_count=len(all_draws)
+    is_full_history=bool(full_count and full_oldest==1 and not missing_rounds and not invalid_rows)
+    range_label=(f'최근 {requested}회' if requested>0 else '1회차~현재 전체')
 
     return {
         'count':count,
         'display_count':count,
         'limit':requested,
+        'range_label':range_label,
         'latest':draws[0] if draws else None,
         'recent_draws':draws,
         'hot':hot,
         'cold':cold,
         'missing20':overdue,
+        'overdue':overdue,
         'odd':odd,
         'even':even,
+        'odd_avg':round(odd/count,2) if count else 0,
+        'even_avg':round(even/count,2) if count else 0,
         'sections':sections,
+        'section_avg':[round(v/count,2) if count else 0 for v in sections],
         'sum_min':min(sums) if sums else 0,
         'sum_avg':round(sum(sums)/len(sums),1) if sums else 0,
         'sum_max':max(sums) if sums else 0,
         'top_pairs':[{'pair':list(k),'count':v} for k,v in pair_counter.most_common(15)],
         'freq':freq,
         'freq100':freq,
-        'analysis_confirm':f'{oldest_round}회차부터 {latest_round}회차까지 {count}개 회차 분석' if count else '저장된 당첨번호 없음',
+        'analysis_confirm':(
+            f'{oldest_round}회차부터 {latest_round}회차까지 {count}개 회차 분석'
+            if count else '저장된 유효 당첨번호 없음'
+        ),
         'round_range':[oldest_round, latest_round] if count else [],
         'latest_round':latest_round,
         'target_round':latest_round,
-        'is_full_history':bool(count and oldest_round==1 and missing_count==0),
-        'missing_rounds_count':missing_count,
-        'expected_count':expected_count,
-        'actual_count':count,
+        'full_history':{
+            'count':full_count,
+            'oldest_round':full_oldest,
+            'latest_round':full_latest,
+            'expected_count':full_expected,
+            'missing_count':len(missing_rounds),
+            'missing_rounds':missing_rounds[:100],
+            'invalid_count':len(invalid_rows),
+            'invalid_rounds':sorted(set(invalid_rows))[:100],
+            'is_complete':is_full_history,
+        },
+        # 기존 프론트/외부 호출과의 호환 필드
+        'is_full_history':is_full_history,
+        'missing_rounds_count':len(missing_rounds),
+        'missing_rounds':missing_rounds[:100],
+        'invalid_rows_count':len(invalid_rows),
+        'expected_count':full_expected,
+        'actual_count':full_count,
     }
 
 def csv_response(filename, headers, rows):

@@ -24,18 +24,25 @@ function renderStats(d){
   const cold=(d.cold||[]).map(n=>`<span class="ball ${ballClass(n)}">${n}</span>`).join('');
   const miss=(d.missing20||d.overdue||[]).map(n=>`<span class="ball ${ballClass(n)}">${n}</span>`).join('');
   const pairs=(d.top_pairs||[]).map(p=>`<span class="mini-chip">${(p.pair||[]).join('-')} · ${p.count}회</span>`).join('');
+  const full=d.full_history||{};
+  const fullOld=full.oldest_round||((d.round_range||[])[0])||0;
+  const fullLatest=full.latest_round||d.latest_round||0;
+  const fullCount=full.count||d.actual_count||0;
+  const fullMissing=Number(full.missing_count ?? d.missing_rounds_count ?? 0);
+  const invalidCount=Number(full.invalid_count ?? d.invalid_rows_count ?? 0);
+  const complete=Boolean(full.is_complete ?? d.is_full_history);
   statsRecentDrawsCache=(d.recent_draws||[]);
   const freq=d.freq || d.freq100 || {};
   const maxFreq=Math.max(1, ...Object.values(freq).map(Number));
   const bars=Object.entries(freq).sort((a,b)=>Number(b[1])-Number(a[1])).slice(0,15).map(([n,c])=>`<div class="stats-bar"><b>${n}</b><div><i style="width:${Math.round(Number(c)/maxFreq*100)}%"></i></div><span>${c}회</span></div>`).join('');
   box.innerHTML=`<div class="stats-dashboard">
     <div class="stats-kpi">
-      <div class="stat-card"><b>${d.count}</b><span>전체 분석 회차</span></div>
+      <div class="stat-card"><b>${d.count}</b><span>${d.range_label||'선택 범위'} 분석 회차</span></div>
       <div class="stat-card"><b>${d.sum_avg}</b><span>평균 합계</span></div>
       <div class="stat-card"><b>${d.odd}:${d.even}</b><span>홀짝 누적</span></div>
       <div class="stat-card"><b>${(d.sections||[]).join(' / ')}</b><span>구간 1~15 / 16~30 / 31~45</span></div>
     </div>
-    <div class="detail-section full-history-status"><h4>전체 회차 분석 상태</h4><div class="history-range"><b>${(d.round_range||[])[0]||1}회차부터 ${(d.round_range||[])[1]||d.latest_round||'-'}회차까지</b><span>총 ${d.count||0}개 회차 분석</span></div><div class="hint">${d.analysis_confirm||'분석 상태 확인 중'} · 누락 ${d.missing_rounds_count||0}개 · 전체분석 ${d.is_full_history?'완료':'미완료'}</div></div>
+    <div class="detail-section full-history-status"><h4>통계 범위 및 전체 데이터 상태</h4><div class="history-range"><b>${d.analysis_confirm||'분석 상태 확인 중'}</b><span>${d.range_label||''}</span></div><div class="hint">전체 DB ${fullOld||'-'}회차~${fullLatest||'-'}회차 · 유효 ${fullCount.toLocaleString()}개 · 누락 ${fullMissing}개 · 비정상 ${invalidCount}개 · 전체이력 ${complete?'완료':'확인 필요'}</div></div>
     <div class="stats-panels">
       <div class="detail-section"><h4>HOT 번호</h4><div class="nums-line">${hot}</div><h4>COLD 번호</h4><div class="nums-line">${cold}</div><h4>미출현/공백 번호</h4><div class="nums-line">${miss}</div></div>
       <div class="detail-section"><h4>번호 발생 빈도 TOP 15</h4><div class="stats-bars">${bars||'데이터 없음'}</div></div>
@@ -46,7 +53,9 @@ function renderStats(d){
   renderStatsRecentDraws();
 }
 async function loadStats(limit=0){
-  const d=await api('/api/stats?limit='+limit);
+  const box=$('statsBox');
+  if(box) box.innerHTML='<div class="hint">통계를 계산하고 있습니다...</div>';
+  const d=await api('/api/stats?limit='+encodeURIComponent(limit));
   renderStats(d);
   const live = buildRealtimeRoundAnalysis(d);
   if(live && (!currentAnalysis || currentAnalysis.includes('데이터 없음') || currentAnalysis.includes('분석 준비'))){
