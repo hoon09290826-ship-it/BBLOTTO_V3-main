@@ -441,13 +441,85 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             "reasons": reasons, "reason": " / ".join(reasons), **detail,
         })
 
-    # 드문 조건에서 후보가 부족하면 제약을 유지한 보완 생성
-    while len(selected) < target:
-        combo = sorted(fixed_nums + _weighted_sample(rng, weights, 6-len(fixed_nums), excluded_nums | set(fixed_nums)))
-        if combo not in selected:
-            score, detail = _combo_score(combo, cache, weights)
-            selected.append(combo)
-            selected_details.append({"numbers": combo, "score": score, "engine_version": ENGINE_VERSION, "engine": ENGINE_VERSION, "type": "보완 균형형", "strategy": "보완 균형형", "portfolio_type": "보완 균형형", "number_evidence": [_number_evidence(n, cache, weights) for n in combo], "reasons": ["전체 이력 가중치 기반 보완 조합"], "reason": "전체 이력 가중치 기반 보완 조합", **detail})
+    # 드문 조건에서 후보가 부족하면 일반 후보와 같은 품질 기준을 유지해 보완 생성합니다.
+    # 무한 반복을 막기 위해 시도 횟수를 제한하고, 검증을 통과한 조합만 추가합니다.
+    fallback_attempts = 0
+    fallback_attempt_limit = max(300, (target - len(selected)) * 250)
+    while len(selected) < target and fallback_attempts < fallback_attempt_limit:
+        fallback_attempts += 1
+        combo = sorted(
+            fixed_nums
+            + _weighted_sample(
+                rng,
+                weights,
+                6 - len(fixed_nums),
+                excluded_nums | set(fixed_nums),
+            )
+        )
+
+        # 일반 후보와 동일하게 조합 품질, 고정수, 제외수, 중복을 다시 검증합니다.
+        if not _valid(combo):
+            continue
+        if any(n not in combo for n in fixed_nums):
+            continue
+        if any(n in excluded_nums for n in combo):
+            continue
+        if combo in selected:
+            continue
+
+        overlap = max((len(set(combo) & set(prev)) for prev in selected), default=0)
+        if overlap >= 5:
+            continue
+
+        base_score, detail = _combo_score(combo, cache, weights)
+        diversity_penalty = sum(
+            max(0, usage[n] - max(1, target // 5)) for n in combo
+        ) * 3.2
+        overlap_penalty = max(0, overlap - 2) * 4.5
+        adjusted = base_score - diversity_penalty - overlap_penalty
+
+        selected.append(combo)
+        usage.update(combo)
+        evidence = [_number_evidence(n, cache, weights) for n in combo]
+        reasons = [
+            "일반 후보와 동일한 검증 기준을 통과한 보완 균형형",
+            f"홀짝 {detail['odd']}:{detail['even']} · 구간 {detail['zones'][0]}-{detail['zones'][1]}-{detail['zones'][2]} · 합계 {detail['sum']}",
+            f"AC {detail['ac']} · 끝수 {detail['end_types']}종 · 이전 조합 최대 중복 {overlap}개",
+        ]
+        selected_details.append({
+            "numbers": combo,
+            "score": round(adjusted, 2),
+            "base_score": round(base_score, 2),
+            "diversity_penalty": round(diversity_penalty, 2),
+            "overlap_penalty": round(overlap_penalty, 2),
+            "max_previous_overlap": overlap,
+            "selection_rank": len(selected),
+            "engine_version": ENGINE_VERSION,
+            "engine": ENGINE_VERSION,
+            "type": "보완 균형형",
+            "strategy": "보완 균형형",
+            "portfolio_type": "보완 균형형",
+            "number_evidence": evidence,
+            "alternative_candidate": None,
+            "selection_trace": {
+                "candidate_base_score": round(base_score, 2),
+                "portfolio_score": round(adjusted, 2),
+                "number_repeat_penalty": round(diversity_penalty, 2),
+                "combo_overlap_penalty": round(overlap_penalty, 2),
+                "max_previous_overlap": overlap,
+                "candidate_rank": None,
+                "fallback": True,
+            },
+            "reasons": reasons,
+            "reason": " / ".join(reasons),
+            **detail,
+        })
+
+    if len(selected) < target:
+        raise RuntimeError(
+            f"요청한 {target}개 조합 중 {len(selected)}개만 생성되었습니다. "
+            "고정수·제외수 조건을 완화한 뒤 다시 시도해주세요."
+        )
 
     elapsed = round((time.perf_counter() - started) * 1000, 2)
     stats = {
