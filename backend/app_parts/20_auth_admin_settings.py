@@ -89,8 +89,12 @@ def update_my_account(req:MyAccountReq, request:Request, authorization: str|None
 
 @router.get('/api/admins')
 def admins(authorization: str|None = Header(default=None)):
-    require_admin(authorization)
-    with con() as c: rows=c.execute('SELECT id,username,name,phone,role,memo,is_active,created_at,updated_at,last_login_at,last_ip FROM admins ORDER BY id').fetchall()
+    admin=require_admin(authorization)
+    with con() as c:
+        if is_super_admin(admin):
+            rows=c.execute('SELECT id,username,name,phone,role,memo,is_active,created_at,updated_at,last_login_at,last_ip FROM admins ORDER BY id').fetchall()
+        else:
+            rows=c.execute('SELECT id,username,name,phone,role,memo,is_active,created_at,updated_at,last_login_at,last_ip FROM admins WHERE id=?', (admin['id'],)).fetchall()
     return [dict(r) for r in rows]
 
 @router.post('/api/admins')
@@ -199,9 +203,13 @@ def activate_admin(admin_id:int, request:Request, authorization: str|None = Head
     admin=require_admin(authorization)
     require_super_admin(admin)
     with con() as c:
-        c.execute('UPDATE admins SET is_active=1, updated_at=? WHERE id=?', (now(), admin_id)); c.commit()
-    log_action(admin,'ACTIVATE_ADMIN',f'관리자 활성화 ID {admin_id}',request)
-    return {'ok':True}
+        target=c.execute('SELECT id,username,is_active FROM admins WHERE id=?', (admin_id,)).fetchone()
+        if not target:
+            raise HTTPException(404, '관리자를 찾을 수 없습니다.')
+        c.execute('UPDATE admins SET is_active=1, updated_at=? WHERE id=?', (now(), admin_id))
+        c.commit()
+    log_action(admin,'ACTIVATE_ADMIN',f'관리자 활성화: {target["username"]} / ID {admin_id}',request)
+    return {'ok':True,'changed':0 if int(target['is_active'] or 0)==1 else 1}
 
 @router.post('/api/sessions/cleanup')
 def cleanup_sessions(request:Request, authorization: str|None = Header(default=None)):
@@ -284,10 +292,16 @@ def dashboard_summary(authorization: str|None = Header(default=None)):
 
 @router.get('/api/settings')
 def get_settings(authorization: str|None = Header(default=None)):
-    require_admin(authorization)
+    admin=require_admin(authorization)
     with con() as c:
         rows=c.execute('SELECT key,value,updated_at FROM settings').fetchall()
-    return {r['key']:{'value':clean_template_text(r['value']) if r['key']=='sms_template' else r['value'],'updated_at':r['updated_at']} for r in rows}
+    allowed = None if is_super_admin(admin) else {'sms_template'}
+    result={}
+    for r in rows:
+        if allowed is not None and r['key'] not in allowed:
+            continue
+        result[r['key']]={'value':clean_template_text(r['value']) if r['key']=='sms_template' else r['value'],'updated_at':r['updated_at']}
+    return result
 
 @router.get('/api/template')
 def get_template(authorization: str|None = Header(default=None)):
@@ -312,6 +326,8 @@ def save_setting(req:SettingReq, request:Request, authorization: str|None = Head
     allowed={'sms_template','sms_provider','sms_sender','sms_api_url','sms_api_key','session_timeout_minutes','auto_logout_warning_minutes'}
     if req.key not in allowed:
         raise HTTPException(400,'허용되지 않은 설정입니다.')
+    if req.key != 'sms_template':
+        require_super_admin(admin)
     with con() as c:
         c.execute('INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES(?,?,?)',(req.key,clean_template_text(req.value) if req.key=='sms_template' else req.value,now()))
         c.commit()
@@ -333,6 +349,7 @@ def admin_stats(authorization: str|None = Header(default=None)):
 @router.get('/api/admin-logs')
 def admin_logs(limit:int=100, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
+    limit=max(1,min(int(limit or 100),500))
     with con() as c: rows=c.execute('SELECT * FROM admin_logs ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
     return [dict(r) for r in rows]
 

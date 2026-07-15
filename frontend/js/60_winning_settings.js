@@ -128,7 +128,8 @@ window.cleanupSessions=async function(){
 async function addAdmin(){
   if(!currentAdmin?.is_super_admin){ alert('최고 관리자만 관리자 계정을 생성할 수 있습니다.'); return; }
   const body={username:$('newAdmin')?.value||'', name:$('newAdminName')?.value||'관리자', password:$('newAdminPw')?.value||'', role:$('newAdminRole')?.value||'전체권한', memo:$('newAdminMemo')?.value||''};
-  if(!body.username || body.password.length<4){ alert('관리자 아이디와 4자리 이상 비밀번호를 입력하세요.'); return; }
+  if(!body.username){ alert('관리자 아이디를 입력하세요.'); return; }
+  if(body.password.length<10){ alert('비밀번호는 10자 이상으로 입력하세요.'); return; }
   await api('/api/admins',{method:'POST',body});
   ['newAdmin','newAdminName','newAdminPw','newAdminMemo'].forEach(x=>setValue(x,''));
   setValue('newAdminRole','일반관리자');
@@ -154,11 +155,13 @@ window.toggleAdmin=safe(async function(id, active){
 });
 window.changeMyPassword=safe(async function(id){
   if(!currentAdmin || Number(id)!==Number(currentAdmin.id)) return alert('본인 비밀번호만 변경할 수 있습니다.');
-  const password=prompt('새 비밀번호를 입력하세요 (4자리 이상)', '');
-  if(password===null) return;
-  if(password.length<4) return alert('비밀번호는 4자리 이상입니다.');
-  await api('/api/admins/'+id,{method:'PUT',body:{password}});
-  toast('비밀번호를 변경했습니다.');
+  const currentPassword=prompt('현재 비밀번호를 입력하세요.', '');
+  if(currentPassword===null) return;
+  const newPassword=prompt('새 비밀번호를 입력하세요. (10자 이상, 영문 대·소문자/숫자/특수문자 중 3종류 이상)', '');
+  if(newPassword===null) return;
+  if(newPassword.length<10) return alert('새 비밀번호는 10자 이상이어야 합니다.');
+  await api('/api/me',{method:'PUT',body:{current_password:currentPassword,new_password:newPassword}});
+  toast('비밀번호를 변경했습니다. 다시 로그인할 때 새 비밀번호를 사용하세요.');
 });
 function openAdminEditModal(admin){
   return new Promise(resolve=>{
@@ -176,7 +179,7 @@ function openAdminEditModal(admin){
       <label style="display:block;margin:10px 0 6px;font-weight:700;">관리자 권한</label>
       <select id="editRole" style="width:100%;box-sizing:border-box;padding:13px;border-radius:12px;border:1px solid rgba(212,175,55,.5);background:#050505;color:white;"><option value="일반관리자">일반관리자</option><option value="대표관리자">대표관리자</option></select>
       <label style="display:block;margin:10px 0 6px;font-weight:700;">새 비밀번호</label>
-      <input id="editPassword" type="password" placeholder="변경하려면 4자리 이상 입력" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:13px;border-radius:12px;border:1px solid rgba(212,175,55,.5);background:#050505;color:white;">
+      <input id="editPassword" type="password" placeholder="변경하려면 10자 이상 입력" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:13px;border-radius:12px;border:1px solid rgba(212,175,55,.5);background:#050505;color:white;">
       <label style="display:block;margin:10px 0 6px;font-weight:700;">메모</label>
       <input id="editMemo" value="${esc(admin.memo||'')}" style="width:100%;box-sizing:border-box;padding:13px;border-radius:12px;border:1px solid rgba(212,175,55,.5);background:#050505;color:white;">
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
@@ -191,7 +194,7 @@ function openAdminEditModal(admin){
     wrap.addEventListener('click', e=>{ if(e.target===wrap) close(null); });
     $('saveAdminEdit').onclick=()=>{
       const password=$('editPassword').value.trim();
-      if(password && password.length<4){ alert('비밀번호는 4자리 이상입니다.'); return; }
+      if(password && password.length<10){ alert('비밀번호는 10자 이상이어야 합니다.'); return; }
       const body={
         name:$('editName').value.trim() || '관리자',
         role:$('editRole').value.trim() || '전체권한',
