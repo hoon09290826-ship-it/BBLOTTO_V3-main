@@ -1,3 +1,4 @@
+from .ai.ai_lab_activation import load_stable_profile as ai_lab_load_stable_profile
 # Extracted from legacy backend/app.py lines 2873-3075.
 @router.post('/api/generate')
 def generate(req:GenerateReq, request:Request, authorization: str|None = Header(default=None)):
@@ -5,6 +6,7 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     member_name=''
     member_grade='일반'
     member_id=req.member_id
+    stable_lab = {}
     with con() as c:
         member_id, member_name = rc312_resolve_member(c, member_id, '')
         try:
@@ -13,18 +15,26 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
                 member_grade = rc45_grade_label(_mg['grade'] if _mg else '일반')
         except Exception:
             member_grade = '일반'
+        try:
+            stable_lab = ai_lab_load_stable_profile(c) or {}
+        except Exception:
+            stable_lab = {}
     # RC3-12: 회원을 선택하지 않은 추천은 기존 호환을 위해 허용하지만,
     # 프론트에서는 회원 선택을 안내하여 이후 당첨확인에서 '회원 선택 없음'이 나오지 않도록 합니다.
     excluded_value = req.excluded or req.exclude or ''
     safe_count=max(1, min(50, int(req.count or 10)))
     safe_round=max(1, int(req.round_no or 1))
     safe_mode=req.mode or 'balanced'
-    combos, details, st = make_premium_combos(safe_count, req.fixed, excluded_value, safe_mode, member_grade, member_id=member_id)
+    combos, details, st = make_premium_combos(safe_count, req.fixed, excluded_value, safe_mode, member_grade, member_id=member_id, lab_weight_profile=(stable_lab.get('weights') or None))
     # RC7-1: 회원별 AI 엔진 V2 문구/번호 분산용 회원 시드 정보
     try:
         st['member_id'] = member_id or 0
         st['member_name'] = member_name or ''
         st['member_grade'] = member_grade
+        st['ai_lab_stable_version_id'] = int(stable_lab.get('version_id') or 0)
+        st['ai_lab_stable_version_name'] = stable_lab.get('version_name') or ''
+        st['ai_lab_profile_name'] = stable_lab.get('profile_name') or ''
+        st['ai_lab_profile_applied'] = bool(stable_lab.get('weights'))
     except Exception:
         _log_suppressed_exception("40_recommendations_sms.py:29")
     details = rc37_enrich_details(combos, details)

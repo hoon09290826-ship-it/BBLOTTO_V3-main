@@ -30,6 +30,15 @@ from .ai.ai_lab_runner import (
 )
 from .recommendation_engine import ENGINE_VERSION
 
+from .ai.ai_lab_activation import (
+    ACTIVATION_VERSION,
+    approve_best_candidate as ai_lab_approve_best_candidate,
+    ensure_activation_tables,
+    list_activations as ai_lab_list_activations,
+    load_stable_profile as ai_lab_load_stable_profile,
+    rollback_stable as ai_lab_rollback_stable,
+)
+
 
 class AiLabProfileReq(BaseModel):
     name: str
@@ -41,6 +50,17 @@ class AiLabJobReq(BaseModel):
     range_type: str = 'recent300'
     candidate_limit: int = 12
     random_seed: int = 0
+
+
+class AiLabApproveReq(BaseModel):
+    job_id: int
+    version_id: int
+    reason: str = '관리자 승인'
+
+
+class AiLabRollbackReq(BaseModel):
+    target_version_id: int
+    reason: str = '관리자 롤백'
 
 
 @router.get('/api/ai-lab/overview')
@@ -231,6 +251,61 @@ def ai_lab_job_rankings(job_id: int, authorization: str | None = Header(default=
         raise HTTPException(404, str(exc))
     return {'ok': True, 'items': items, 'count': len(items), 'operating_engine_changed': False}
 
+
+
+@router.get('/api/ai-lab/stable')
+def ai_lab_stable(authorization: str | None = Header(default=None)):
+    admin = require_admin(authorization)
+    require_super_admin(admin)
+    with con() as c:
+        item = ai_lab_load_stable_profile(c)
+    return {'ok': True, 'item': item, 'activation_version': ACTIVATION_VERSION}
+
+
+@router.post('/api/ai-lab/approve')
+def ai_lab_approve(req: AiLabApproveReq, request: Request, authorization: str | None = Header(default=None)):
+    admin = require_admin(authorization)
+    require_super_admin(admin)
+    try:
+        with con() as c:
+            result = ai_lab_approve_best_candidate(c, req.job_id, req.version_id, reason=req.reason, created_by=int(admin['id']))
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.exception('AI LAB stable approval failed: job_id=%s version_id=%s', req.job_id, req.version_id)
+        raise HTTPException(500, f'Stable 승인 중 오류가 발생했습니다: {exc}')
+    log_action(admin, 'AI_LAB_STABLE_APPROVE', f"AI LAB Candidate #{req.version_id} Stable 승인", request)
+    return {'ok': True, 'activation_version': ACTIVATION_VERSION, **result}
+
+
+@router.post('/api/ai-lab/rollback')
+def ai_lab_rollback(req: AiLabRollbackReq, request: Request, authorization: str | None = Header(default=None)):
+    admin = require_admin(authorization)
+    require_super_admin(admin)
+    try:
+        with con() as c:
+            result = ai_lab_rollback_stable(c, req.target_version_id, reason=req.reason, created_by=int(admin['id']))
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.exception('AI LAB stable rollback failed: target=%s', req.target_version_id)
+        raise HTTPException(500, f'Stable 롤백 중 오류가 발생했습니다: {exc}')
+    log_action(admin, 'AI_LAB_STABLE_ROLLBACK', f"AI LAB Stable #{req.target_version_id} 롤백", request)
+    return {'ok': True, 'activation_version': ACTIVATION_VERSION, **result}
+
+
+@router.get('/api/ai-lab/activations')
+def ai_lab_activations(limit: int = 100, authorization: str | None = Header(default=None)):
+    admin = require_admin(authorization)
+    require_super_admin(admin)
+    with con() as c:
+        items = ai_lab_list_activations(c, limit=limit)
+    return {'ok': True, 'items': items, 'count': len(items)}
+
 @router.get('/api/ai-lab/notes')
 def ai_lab_notes(job_id: int = 0, limit: int = 100, authorization: str | None = Header(default=None)):
     admin = require_admin(authorization)
@@ -242,5 +317,7 @@ def ai_lab_notes(job_id: int = 0, limit: int = 100, authorization: str | None = 
 try:
     with con() as _ai_lab_conn:
         ai_lab_bootstrap(_ai_lab_conn, engine_code_version=ENGINE_VERSION, created_by=0)
+        ensure_activation_tables(_ai_lab_conn)
+        _ai_lab_conn.commit()
 except Exception:
     logger.exception('RC6-D1 AI LAB schema initialization failed')
