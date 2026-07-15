@@ -5,7 +5,7 @@ import hashlib
 import json
 from typing import Any, Dict, List, Optional
 
-AI_LAB_SCHEMA_VERSION = "RC6_D1_1"
+AI_LAB_SCHEMA_VERSION = "RC6_D1_2"
 DEFAULT_PROFILE_NAME = "RC4.5 Stable Baseline"
 DEFAULT_WEIGHTS: Dict[str, float] = {
     "recent_10": 0.20,
@@ -226,7 +226,7 @@ def create_learning_job(c: Any, *, range_type: str, candidate_limit: int, random
         raise ValueError("Stable 엔진이 없습니다.")
     profile_id = int(stable["profile_id"] or 0)
     target = 300 if range_type == "recent300" else 500 if range_type == "recent500" else 0
-    config = {"auto_apply": False, "operating_engine_unchanged": True, "optimizer_enabled": False, "schema_version": AI_LAB_SCHEMA_VERSION}
+    config = {"auto_apply": False, "operating_engine_unchanged": True, "optimizer_enabled": False, "baseline_runner_enabled": True, "schema_version": AI_LAB_SCHEMA_VERSION}
     cur = c.execute(
         "INSERT INTO ai_learning_jobs(status,range_type,base_version_id,profile_id,target_rounds,processed_rounds,candidate_limit,random_seed,config_json,result_json,error_message,created_by,created_at,updated_at) "
         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -241,7 +241,7 @@ def create_learning_job(c: Any, *, range_type: str, candidate_limit: int, random
         job_id = int(saved["id"])
     c.execute(
         "INSERT INTO ai_learning_notes(job_id,version_id,note_type,title,body,data_json,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)",
-        (job_id, int(stable["id"]), "job_created", "학습 작업 생성", "RC6-D1에서는 학습 작업과 버전만 생성하며 운영 엔진을 변경하지 않습니다.", _json(config), created_by, _now()),
+        (job_id, int(stable["id"]), "job_created", "학습 작업 생성", "RC6-D1 2단계에서는 Stable 기준 성능을 측정하며 운영 엔진을 변경하지 않습니다.", _json(config), created_by, _now()),
     )
     c.commit()
     return get_job(c, job_id)
