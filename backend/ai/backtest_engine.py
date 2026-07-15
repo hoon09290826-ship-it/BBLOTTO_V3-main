@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ..recommendation_engine import ENGINE_VERSION, build_backtest_cache, make_premium_combos
 
-BACKTEST_VERSION = "BBLOTTO_BACKTEST_RC6_D7"
+BACKTEST_VERSION = "BBLOTTO_BACKTEST_RC6_D7_COLDSTART"
 DEFAULT_COMBO_COUNT = 10
 DEFAULT_MIN_HISTORY = 1
 MAX_STEP_SIZE = 5
@@ -236,13 +236,16 @@ def _evaluate(combos: Sequence[Sequence[int]], details: Sequence[Dict[str, Any]]
 def create_run(c: Any, *, created_by: int, combo_count: int = DEFAULT_COMBO_COUNT, mode: str = "balanced", min_history: int = DEFAULT_MIN_HISTORY) -> Dict[str, Any]:
     ensure_backtest_tables(c)
     draws = load_draws(c)
-    if len(draws) < 2:
-        raise ValueError("백테스트를 실행하려면 유효한 당첨 회차가 최소 2개 필요합니다.")
+    if len(draws) < 1:
+        raise ValueError("백테스트를 실행하려면 유효한 당첨 회차가 최소 1개 필요합니다.")
     first_round = int(draws[0]["round"])
     last_round = int(draws[-1]["round"])
     combo_count = max(1, min(50, int(combo_count or DEFAULT_COMBO_COUNT)))
     min_history = max(1, int(min_history or DEFAULT_MIN_HISTORY))
-    start_round = first_round + 1
+    # RC6-D7 cold-start: include the first available round.  The first round
+    # is evaluated from an empty history cache, so its winning numbers are
+    # never visible to the generator.  Later rounds remain walk-forward tests.
+    start_round = first_round
     eligible = [d for d in draws if int(d["round"]) >= start_round]
     _now_value = _now()
     cur = c.execute(
@@ -317,11 +320,15 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
         started = time.perf_counter()
         seed = f"{BACKTEST_VERSION}|run:{run_id}|round:{target_round}|mode:{run['mode']}|count:{run['combo_count']}|profile:{profile_label}"
         try:
-            if len(history) < _safe_int(run.get("min_history"), DEFAULT_MIN_HISTORY, minimum=1):
+            is_cold_start = len(history) == 0
+            if not is_cold_start and len(history) < _safe_int(run.get("min_history"), DEFAULT_MIN_HISTORY, minimum=1):
                 status = "skipped"
                 error = f"이전 회차 {len(history)}개로 최소 이력 {run['min_history']}개를 충족하지 못했습니다."
                 skipped += 1
             else:
+                # Empty history is allowed only for the first target round.
+                # build_backtest_cache([]) returns neutral/equal historical
+                # features, and the deterministic seed contains no winning data.
                 cache = build_backtest_cache(history)
                 combos, details, stats = make_premium_combos(
                     _safe_int(run.get("combo_count"), DEFAULT_COMBO_COUNT, minimum=1, maximum=50),
@@ -335,6 +342,7 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
                 result["recommended_numbers"] = combos
                 result["details"] = details
                 result["engine_stats"] = stats
+                result["validation_mode"] = "cold_start" if is_cold_start else "walk_forward"
                 success += 1
         except Exception as exc:
             status = "failed"
@@ -349,7 +357,7 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
                 int(run_id), int(target_round), int(history[0]["round"]) if history else 0, int(history[-1]["round"]) if history else 0, len(history), run["mode"], ENGINE_VERSION, seed,
                 json.dumps(target["numbers"], ensure_ascii=False), int(target.get("bonus") or 0),
                 json.dumps(result.get("recommended_numbers", []), ensure_ascii=False),
-                json.dumps({"combo_results": result.get("combo_results", []), "engine_stats": result.get("engine_stats", {})}, ensure_ascii=False),
+                json.dumps({"combo_results": result.get("combo_results", []), "engine_stats": result.get("engine_stats", {}), "validation_mode": result.get("validation_mode", "walk_forward")}, ensure_ascii=False),
                 int(result.get("best_match", 0)), result.get("best_rank", "낙첨"), json.dumps(result.get("match_distribution", {}), ensure_ascii=False),
                 int(result.get("pool_match_count", 0)), json.dumps(result.get("pool_numbers", []), ensure_ascii=False),
                 float(result.get("avg_combo_score", 0) or 0), float(result.get("max_combo_score", 0) or 0), generation_ms, status, error, _now(),
@@ -403,7 +411,8 @@ def get_summary(c: Any, run_id: int) -> Dict[str, Any]:
         "duplicate_target_count": max(0, duplicate_targets),
         "passed": not leakage_rows and not history_order_errors and duplicate_targets == 0,
         "rule": "각 대상 회차보다 이전 회차만 학습 데이터로 사용",
-        "excluded_first_round": int(run.get("start_round", 1) or 1) > 1,
+        "excluded_first_round": False,
+        "cold_start_rounds": sum(1 for x in records if int(x.get("history_count", 0) or 0) == 0),
     }
     by_window: Dict[str, Any] = {"all": summarize(records)}
     for window in (50, 100, 300):
@@ -454,7 +463,9 @@ def get_summary(c: Any, run_id: int) -> Dict[str, Any]:
     summary["validation_range"] = {
         "start_round": int(run.get("start_round", 0) or 0),
         "end_round": int(run.get("end_round", 0) or 0),
-        "first_round_exclusion_reason": "첫 회차는 이전 학습 데이터가 없어 검증 대상에서 제외됩니다.",
+        "first_round_exclusion_reason": "",
+        "first_round_validation_mode": "cold_start",
+        "validation_rule": "1회는 과거 이력 없는 콜드 스타트, 2회부터는 대상 회차 이전 이력만 사용하는 순차 검증",
     }
     return {
         "run": run,

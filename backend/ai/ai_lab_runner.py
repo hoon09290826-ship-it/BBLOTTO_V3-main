@@ -13,6 +13,7 @@ from .ai_lab_core import (
     safe_int,
 )
 from .backtest_engine import (
+    BACKTEST_VERSION,
     cancel_run,
     create_run,
     get_run,
@@ -21,7 +22,7 @@ from .backtest_engine import (
     process_step,
 )
 
-RUNNER_VERSION = "RC6_D7_BASELINE_RUNNER"
+RUNNER_VERSION = "RC6_D7_COLDSTART_RUNNER"
 _TERMINAL = {"completed", "failed", "cancelled"}
 
 
@@ -100,8 +101,15 @@ def initialize_job(c: Any, job_id: int, *, created_by: int = 0) -> Dict[str, Any
     existing_run_id = safe_int(config.get("baseline_backtest_run_id"), 0, minimum=0)
     if existing_run_id:
         try:
-            get_run(c, existing_run_id)
-            return job
+            existing_run = get_run(c, existing_run_id)
+            # Runs created by the older 2~latest implementation must not be
+            # resumed, otherwise the deployed UI would continue to show 1231
+            # targets.  Rebuild the baseline automatically with cold-start v2.
+            if str(existing_run.get("backtest_version") or "") == BACKTEST_VERSION:
+                return job
+            cancel_run(c, existing_run_id)
+            config.pop("baseline_backtest_run_id", None)
+            config["replaced_legacy_backtest_run_id"] = existing_run_id
         except KeyError:
             config.pop("baseline_backtest_run_id", None)
 
