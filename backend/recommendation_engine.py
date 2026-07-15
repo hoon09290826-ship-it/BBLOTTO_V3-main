@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .ai.cache_engine import get_analysis_cache as _persistent_analysis_cache
 from .ai.scheduler import ensure_scheduler_started as _ensure_ai_scheduler_started
+from .ai.member_history import load_member_profile as _load_member_profile, member_structure_adjustment as _member_structure_adjustment
 from .ai.score_engine import (
     SCORE_ENGINE_VERSION,
     build_number_weights as _build_number_weights,
@@ -380,7 +381,7 @@ def _combo_evidence(nums: Sequence[int], detail: Dict[str, Any], cache: Dict[str
 
 
 
-def _strategy_fit(combo: Sequence[int], detail: Dict[str, Any], cache: Dict[str, Any], strategy: str) -> Tuple[float, Dict[str, float]]:
+def _strategy_fit(combo: Sequence[int], detail: Dict[str, Any], cache: Dict[str, Any], strategy: str, member_profile: Optional[Dict[str, Any]] = None) -> Tuple[float, Dict[str, float]]:
     """Return a transparent strategy bonus for the candidate combination.
 
     Strategies do not bypass the common quality validator. They only change
@@ -413,6 +414,11 @@ def _strategy_fit(combo: Sequence[int], detail: Dict[str, Any], cache: Dict[str,
         components["zone_balance_bonus"] = max(0.0, zone_balance * 5.0)
         components["sum_center_bonus"] = max(0.0, 4.0 - abs(float(detail.get("sum", 138)) - 138.0) / 18.0)
         components["end_spread_bonus"] = min(2.5, max(0, end_types - 3) * 0.8)
+    if member_profile and member_profile.get("enabled"):
+        history_bonus = float((member_profile.get("strategy_adjustments") or {}).get(strategy, 0) or 0)
+        structure_bonus = _member_structure_adjustment(detail, member_profile)
+        components["member_strategy_adjustment"] = history_bonus
+        components["member_structure_adjustment"] = structure_bonus
     return round(sum(components.values()), 4), {k: round(v, 4) for k, v in components.items()}
 
 
@@ -465,6 +471,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
 
     cache = cache_override if cache_override is not None else get_analysis_cache(False)
     weights = _mode_weights(cache, mode, member_grade)
+    member_profile = _load_member_profile(_resolve_primary_db_path(), member_id) if member_id and cache_override is None else {"enabled": False, "member_id": int(member_id or 0), "strategy_adjustments": {}}
     seed_basis = deterministic_seed if deterministic_seed is not None else str(time.time_ns())
     seed_text = f"{seed_basis}|{member_id}|{member_grade}|{mode}|{fixed_nums}|{sorted(excluded_nums)}|{cache.get('latest_round')}"
     rng = random.Random(int(hashlib.sha256(seed_text.encode()).hexdigest()[:16], 16))
@@ -499,7 +506,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             overlap = max((len(set(combo) & set(prev)) for prev in selected), default=0)
             if overlap >= 5:
                 continue
-            strategy_bonus, strategy_components = _strategy_fit(combo, detail, cache, strategy)
+            strategy_bonus, strategy_components = _strategy_fit(combo, detail, cache, strategy, member_profile)
             portfolio_adjustment, portfolio_components = _portfolio_adjustment(combo, selected, usage, target)
             final_score = float(base_score) + strategy_bonus + portfolio_adjustment
             candidate = (final_score, float(base_score), tuple(combo), detail, strategy_bonus, strategy_components, portfolio_adjustment, portfolio_components)
@@ -557,6 +564,14 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             "type": strategy, "strategy": strategy, "portfolio_type": strategy,
             "number_evidence": evidence, "alternative_candidate": alternative,
             "combo_evidence": _combo_evidence(combo, detail, cache, weights),
+            "member_adaptation": {
+                "enabled": bool(member_profile.get("enabled")),
+                "evaluated_runs": int(member_profile.get("evaluated_runs", 0) or 0),
+                "confidence": float(member_profile.get("confidence", 0) or 0),
+                "best_strategy": member_profile.get("best_strategy") or "균형형",
+                "strategy_adjustment": round(float(strategy_components.get("member_strategy_adjustment", 0) or 0), 4),
+                "structure_adjustment": round(float(strategy_components.get("member_structure_adjustment", 0) or 0), 4),
+            },
             "score_components": {
                 "base_combo_score": round(base_score, 4),
                 "strategy_bonus": round(strategy_bonus, 4),
@@ -667,6 +682,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         "generation_ms": elapsed, "candidate_count": len(pool), "attempts": attempts,
         "hot": cache.get("hot", [])[:12], "cold": cache.get("cold", [])[:12], "overdue": cache.get("overdue", [])[:12],
         "unique_numbers": len(usage), "max_number_use": max(usage.values(), default=0),
+        "member_adaptation": {"enabled": bool(member_profile.get("enabled")), "member_id": int(member_id or 0), "evaluated_runs": int(member_profile.get("evaluated_runs", 0) or 0), "confidence": float(member_profile.get("confidence", 0) or 0), "best_strategy": member_profile.get("best_strategy") or "균형형", "safety": member_profile.get("safety") or {}},
         "methodology": ["AI-01 영구 캐시 기반", "1회차~최신 회차 전체 분석", "최근 10·30·50·100·300회 다중 가중치", "미출현 간격·모멘텀", "동반출현·트리플", "홀짝·구간·합계·AC·끝수", "조합 간 중복 억제", "전략별 포트폴리오 재평가", "번호 반복·구간 편중 동적 보정"],
     }
     return selected[:target], selected_details[:target], stats
