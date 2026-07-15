@@ -339,6 +339,40 @@ def _number_evidence(n: int, cache: Dict[str, Any], weights: Optional[Dict[int, 
     }
 
 
+def _combo_evidence(nums: Sequence[int], detail: Dict[str, Any], cache: Dict[str, Any], weights: Dict[int, float]) -> Dict[str, Any]:
+    """Persist the exact combination-level facts used by the explanation engine."""
+    pair_map = cache.get("pair_counts", {}) or {}
+    pairs: List[Dict[str, Any]] = []
+    ordered = sorted(int(n) for n in nums)
+    for i, left in enumerate(ordered):
+        for right in ordered[i + 1:]:
+            raw = pair_map.get(f"{left}-{right}", pair_map.get(f"{right}-{left}", 0))
+            try:
+                value = float(raw or 0)
+            except (TypeError, ValueError):
+                value = 0.0
+            if value > 0:
+                pairs.append({"numbers": [left, right], "strength": round(value, 3)})
+    pairs.sort(key=lambda item: (-item["strength"], item["numbers"]))
+
+    number_scores = sorted(
+        ({"number": int(n), "selection_score": round(float(weights.get(int(n), 0) or 0), 4)} for n in ordered),
+        key=lambda item: (-item["selection_score"], item["number"]),
+    )
+    return {
+        "top_number_scores": number_scores[:3],
+        "pair_highlights": pairs[:3],
+        "constraints": {
+            "sum_in_range": 75 <= int(detail.get("sum", sum(ordered))) <= 210,
+            "odd_even_balanced": 1 <= int(detail.get("odd", sum(n % 2 for n in ordered))) <= 5,
+            "zone_limit_passed": max(detail.get("zones", [0, 0, 0])) <= 4,
+            "end_digit_limit_passed": int(detail.get("max_end_dup", 0)) <= 3,
+            "ac_passed": int(detail.get("ac", 0)) >= 4,
+            "consecutive_limit_passed": int(detail.get("consecutive", 0)) <= 3,
+        },
+    }
+
+
 def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None):
     started = time.perf_counter()
     target = max(1, min(50, int(count or 10)))
@@ -430,6 +464,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             "engine_version": ENGINE_VERSION, "engine": ENGINE_VERSION,
             "type": archetype, "strategy": archetype, "portfolio_type": archetype,
             "number_evidence": evidence, "alternative_candidate": alternative,
+            "combo_evidence": _combo_evidence(combo, detail, cache, weights),
             "selection_trace": {
                 "candidate_base_score": round(base_score, 2),
                 "portfolio_score": round(adjusted, 2),
@@ -501,6 +536,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             "portfolio_type": "보완 균형형",
             "number_evidence": evidence,
             "alternative_candidate": None,
+            "combo_evidence": _combo_evidence(combo, detail, cache, weights),
             "selection_trace": {
                 "candidate_base_score": round(base_score, 2),
                 "portfolio_score": round(adjusted, 2),
