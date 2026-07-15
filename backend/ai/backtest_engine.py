@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ..recommendation_engine import ENGINE_VERSION, build_backtest_cache, make_premium_combos
 
-BACKTEST_VERSION = "BBLOTTO_BACKTEST_RC6_A"
+BACKTEST_VERSION = "BBLOTTO_BACKTEST_RC6_D7"
 DEFAULT_COMBO_COUNT = 10
 DEFAULT_MIN_HISTORY = 1
 MAX_STEP_SIZE = 5
@@ -394,6 +394,17 @@ def get_summary(c: Any, run_id: int) -> Dict[str, Any]:
             "avg_generation_ms": round(sum(float(x.get("generation_ms", 0) or 0) for x in items) / n, 2),
         }
 
+    leakage_rows = [x for x in records if int(x.get("history_to", 0) or 0) >= int(x.get("target_round", 0) or 0)]
+    history_order_errors = [x for x in records if int(x.get("history_from", 0) or 0) > int(x.get("history_to", 0) or 0)]
+    duplicate_targets = len(records) - len({int(x.get("target_round", 0) or 0) for x in records})
+    integrity = {
+        "data_leakage_count": len(leakage_rows),
+        "history_order_error_count": len(history_order_errors),
+        "duplicate_target_count": max(0, duplicate_targets),
+        "passed": not leakage_rows and not history_order_errors and duplicate_targets == 0,
+        "rule": "각 대상 회차보다 이전 회차만 학습 데이터로 사용",
+        "excluded_first_round": int(run.get("start_round", 1) or 1) > 1,
+    }
     by_window: Dict[str, Any] = {"all": summarize(records)}
     for window in (50, 100, 300):
         by_window[str(window)] = summarize(records[-window:])
@@ -438,9 +449,16 @@ def get_summary(c: Any, run_id: int) -> Dict[str, Any]:
             **metrics,
         })
 
+    summary = dict(by_window["all"])
+    summary["integrity"] = integrity
+    summary["validation_range"] = {
+        "start_round": int(run.get("start_round", 0) or 0),
+        "end_round": int(run.get("end_round", 0) or 0),
+        "first_round_exclusion_reason": "첫 회차는 이전 학습 데이터가 없어 검증 대상에서 제외됩니다.",
+    }
     return {
         "run": run,
-        "summary": by_window["all"],
+        "summary": summary,
         "by_window": by_window,
         "by_strategy": by_strategy,
         "trend_blocks": trend_blocks,

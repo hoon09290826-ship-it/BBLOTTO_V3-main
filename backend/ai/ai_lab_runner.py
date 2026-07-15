@@ -21,7 +21,7 @@ from .backtest_engine import (
     process_step,
 )
 
-RUNNER_VERSION = "RC6_D1_2_BASELINE_RUNNER"
+RUNNER_VERSION = "RC6_D7_BASELINE_RUNNER"
 _TERMINAL = {"completed", "failed", "cancelled"}
 
 
@@ -159,7 +159,7 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
     try:
         result = process_step(c, run_id, step_size=max(1, min(5, safe_int(step_size, 1, minimum=1, maximum=5))))
         run = result["run"]
-        status = "completed" if result.get("done") else "running"
+        status = "baseline_completed" if result.get("done") else "running"
         started_at_sql = "started_at=CASE WHEN started_at='' THEN ? ELSE started_at END,"
         c.execute(
             f"UPDATE ai_learning_jobs SET status=?,processed_rounds=?,target_rounds=?,{started_at_sql}updated_at=?,error_message='' WHERE id=?",
@@ -189,7 +189,7 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
                 "optimizer_executed": False,
             }
             c.execute(
-                "UPDATE ai_learning_jobs SET status='completed',processed_rounds=?,target_rounds=?,result_json=?,completed_at=?,updated_at=? WHERE id=?",
+                "UPDATE ai_learning_jobs SET status='baseline_completed',processed_rounds=?,target_rounds=?,result_json=?,completed_at=?,updated_at=? WHERE id=?",
                 (
                     safe_int(run.get("processed_rounds"), 0, minimum=0),
                     safe_int(run.get("total_rounds"), 0, minimum=0),
@@ -230,7 +230,7 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
         return {
             "job": updated,
             "processed": safe_int(result.get("processed"), 0, minimum=0),
-            "done": updated["status"] == "completed",
+            "done": updated["status"] in {"baseline_completed", "completed"},
             "backtest_run": run,
         }
     except Exception as exc:

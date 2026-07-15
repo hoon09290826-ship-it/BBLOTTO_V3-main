@@ -201,7 +201,7 @@ def get_overview(c: Any) -> Dict[str, Any]:
     for table, key in (("ai_engine_versions", "versions"), ("ai_weight_profiles", "profiles"), ("ai_learning_jobs", "jobs"), ("ai_learning_notes", "notes")):
         row = c.execute(f"SELECT COUNT(*) AS cnt FROM {table}").fetchone()
         counts[key] = int(row["cnt"] or 0)
-    active = c.execute("SELECT * FROM ai_learning_jobs WHERE status IN ('ready','running','paused') ORDER BY id DESC LIMIT 1").fetchone()
+    active = c.execute("SELECT * FROM ai_learning_jobs WHERE status IN ('ready','running','paused','baseline_completed','candidates_ready') ORDER BY id DESC LIMIT 1").fetchone()
     return {"schema_version": AI_LAB_SCHEMA_VERSION, "stable": _version_dict(stable), "active_job": _job_dict(active), "counts": counts}
 
 
@@ -246,7 +246,7 @@ def create_learning_job(c: Any, *, range_type: str, candidate_limit: int, random
     range_type = str(range_type or "recent300").strip().lower()
     if range_type not in ALLOWED_JOB_RANGES:
         raise ValueError("학습 범위는 recent300, recent500, all 중 하나여야 합니다.")
-    running = c.execute("SELECT id FROM ai_learning_jobs WHERE status IN ('ready','running','paused') ORDER BY id DESC LIMIT 1").fetchone()
+    running = c.execute("SELECT id FROM ai_learning_jobs WHERE status IN ('ready','running','paused','baseline_completed','candidates_ready') ORDER BY id DESC LIMIT 1").fetchone()
     if running:
         raise ValueError(f"완료되지 않은 학습 작업 #{running['id']}이 있습니다.")
     stable = c.execute("SELECT * FROM ai_engine_versions WHERE status='stable' ORDER BY id DESC LIMIT 1").fetchone()

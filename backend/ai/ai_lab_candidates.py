@@ -20,7 +20,7 @@ CANDIDATE_GENERATOR_VERSION = "RC6_D1_3_CANDIDATE_GENERATOR"
 _MIN_WEIGHT = 0.02
 _MAX_WEIGHT = 0.38
 _MAX_ABS_DELTA = 0.08
-_TERMINAL_OK = {"completed", "candidates_ready"}
+_TERMINAL_OK = {"baseline_completed", "completed", "candidates_ready"}
 
 
 def _stable_context(c: Any, job: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
