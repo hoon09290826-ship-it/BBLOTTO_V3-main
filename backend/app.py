@@ -18,6 +18,7 @@ _FEATURE_PARTS = (
     ("70_ai_engine.py", "ai-engine"),
     ("75_backtest.py", "backtest"),
     ("76_member_analysis.py", "member-analysis"),
+    ("77_ai_lab_core.py", "ai-lab-core"),
     ("80_dashboards_operations.py", "dashboards-operations"),
     ("90_release_rc3.py", "release-rc3"),
     ("95_engine_runtime.py", "engine-runtime"),
