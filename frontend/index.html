@@ -68,7 +68,7 @@
     <button type="button" class="admin-tab-btn active" data-admin-panel="adminManagers">관리자</button>
     <button type="button" class="admin-tab-btn" data-admin-panel="adminLogsPanel">활동로그</button>
     <button type="button" class="admin-tab-btn" data-admin-panel="adminBackupPanel">백업</button>
-    <button type="button" class="admin-tab-btn" data-admin-panel="adminAiEnginePanel">AI 엔진</button><button type="button" class="admin-tab-btn" data-admin-panel="adminBacktestPanel">백테스트</button>
+    <button type="button" class="admin-tab-btn" data-admin-panel="adminAiEnginePanel">AI 엔진</button><button type="button" class="admin-tab-btn" data-admin-panel="adminBacktestPanel">백테스트</button><button type="button" class="admin-tab-btn" data-admin-panel="adminAiLabPanel">AI LAB</button>
   </div>
 
   <div class="admin-final-grid">
@@ -120,6 +120,32 @@
       <h4>최근 회차 상세</h4><div id="backtestResults" class="backtest-table hint">결과가 없습니다.</div>
       <div id="backtestPager" class="pager"></div>
     </div>
+
+    <div id="adminAiLabBox" class="box admin-final-card super-only admin-final-tab-panel ai-lab-panel" data-admin-panel-box="adminAiLabPanel">
+      <div class="card-head-line"><h3>AI LAB · 엔진 연구소</h3><span id="aiLabBadge">대기</span></div>
+      <p class="hint">운영 Stable 엔진은 관리자 승인 전까지 변경되지 않습니다. 기준 성능 측정 → 후보 생성 → 동일 조건 비교 → 승인 또는 롤백 순서로 진행합니다.</p>
+      <div id="aiLabStable" class="ai-lab-stable hint">Stable 정보를 불러오는 중입니다.</div>
+      <div class="btnrow wrap ai-lab-actions">
+        <select id="aiLabRange"><option value="recent300">최근 300회</option><option value="recent500">최근 500회</option><option value="all">전체 회차</option></select>
+        <select id="aiLabCandidateLimit"><option value="4">후보 4개</option><option value="6" selected>후보 6개</option><option value="8">후보 8개</option><option value="12">후보 12개</option></select>
+        <button id="aiLabCreateJob" class="primary">새 연구 시작</button>
+        <button id="aiLabRunBaseline">기준 성능 측정</button>
+        <button id="aiLabGenerateCandidates">후보 생성</button>
+        <button id="aiLabCompareCandidates">후보 비교</button>
+        <button id="aiLabRefresh">새로고침</button>
+      </div>
+      <div class="ai-lab-progress"><div id="aiLabProgressBar"></div></div>
+      <div id="aiLabProgressText" class="hint">실행 중인 연구가 없습니다.</div>
+      <div id="aiLabKpis" class="cards compact ai-lab-kpis"></div>
+      <div class="ai-lab-grid">
+        <section><h4>Candidate 순위</h4><div id="aiLabRankings" class="ai-lab-table hint">비교 결과가 없습니다.</div></section>
+        <section><h4>엔진 버전</h4><div id="aiLabVersions" class="ai-lab-table hint">버전 이력이 없습니다.</div></section>
+      </div>
+      <div class="ai-lab-grid">
+        <section><h4>승인·롤백 이력</h4><div id="aiLabActivations" class="ai-lab-table hint">승인 이력이 없습니다.</div></section>
+        <section><h4>AI 연구노트</h4><div id="aiLabNotes" class="ai-lab-notes hint">연구노트가 없습니다.</div></section>
+      </div>
+    </div>
   </div>
 
   <div id="adminSecurityBox" class="super-only" style="display:none">
@@ -142,4 +168,4 @@
     </div>
   </div>
 </section>
-</main></div><script src="/js/00_core.js?v=stage9-1"></script><script src="/js/10_members_dashboard.js?v=stage9-1"></script><script src="/js/20_stats_winning_views.js?v=stage9-1"></script><script src="/js/30_admin.js?v=connection-only-20260714"></script><script src="/js/40_recommendations.js?v=stage9-1"></script><script src="/js/50_exports_sms.js?v=stage9-1"></script><script src="/js/60_winning_settings.js?v=stage9-1"></script><script src="/js/70_backtest_report.js?v=rc6b-1"></script><script src="/js/71_member_analysis.js?v=rc6c-1"></script><script src="/js/90_bootstrap.js?v=stage9-1"></script></body></html>
+</main></div><script src="/js/00_core.js?v=stage9-1"></script><script src="/js/10_members_dashboard.js?v=stage9-1"></script><script src="/js/20_stats_winning_views.js?v=stage9-1"></script><script src="/js/30_admin.js?v=connection-only-20260714"></script><script src="/js/40_recommendations.js?v=stage9-1"></script><script src="/js/50_exports_sms.js?v=stage9-1"></script><script src="/js/60_winning_settings.js?v=stage9-1"></script><script src="/js/70_backtest_report.js?v=rc6b-1"></script><script src="/js/71_member_analysis.js?v=rc6c-1"></script><script src="/js/72_ai_lab_dashboard.js?v=rc6d1-stage6-1"></script><script src="/js/90_bootstrap.js?v=stage9-1"></script></body></html>
