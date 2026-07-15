@@ -46,6 +46,22 @@ function renderActivityLogs(){
   setHTML('activityLogs', html || '<p class="hint">표시할 활동이 없습니다.</p>');
 }
 window.filterActivityLog=function(kind){ activityLogFilter=kind||'all'; renderActivityLogs(); };
+function renderRecoverySummary(status){
+  const el=$('backupSummary');
+  if(!el) return;
+  const integrity=String(status?.checks?.database_integrity||'unknown').toLowerCase();
+  const latest=status?.checks?.latest_backup;
+  const latestText=latest?.created_at ? String(latest.created_at).slice(0,16) : '없음';
+  el.textContent = `${integrity==='ok'?'DB 정상':'DB 점검 필요'} · 최근 백업 ${latestText} · 자동보관 ${Number(status?.backup_keep||30)}개`;
+}
+window.runRecoveryCheck=async function(){
+  if(!confirm('DB 무결성을 점검하고 안전 백업을 새로 생성할까요?')) return;
+  const d=await api('/api/recovery/run',{method:'POST',body:{}});
+  renderRecoverySummary(d.after||{});
+  toast(d.ok?'장애 복구 점검과 안전 백업을 완료했습니다.':'DB 점검 결과를 확인해주세요.');
+  await loadAdmin();
+};
+
 function renderBackupList(backups){
   const rows=(backups||[]).slice(0,5).map(b=>{
     const file=String(b.filename||''); const safe=esc(file); const isJson=file.toLowerCase().endsWith('.json');
@@ -228,7 +244,8 @@ async function loadAdmin(){
     try{
       const backups=await api('/api/backups');
       renderBackupList(backups);
-      if($('backupSummary')) $('backupSummary').textContent = `최근 백업 ${backups.length}개 · 매일 자동백업 유지`;
+      try{ renderRecoverySummary(await api('/api/recovery/status')); }
+      catch(_){ if($('backupSummary')) $('backupSummary').textContent = `최근 백업 ${backups.length}개 · 매일 자동백업 유지`; }
     }catch(e){}
   }
   try{

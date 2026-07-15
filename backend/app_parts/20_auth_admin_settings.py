@@ -347,10 +347,23 @@ def admin_stats(authorization: str|None = Header(default=None)):
     return [dict(r) for r in rows]
 
 @router.get('/api/admin-logs')
-def admin_logs(limit:int=100, authorization: str|None = Header(default=None)):
-    admin=require_admin(authorization); require_super_admin(admin)
+def admin_logs(limit:int=100, action:str='', admin_id:int=0, date_from:str='', date_to:str='', authorization: str|None = Header(default=None)):
+    admin=require_admin(authorization)
     limit=max(1,min(int(limit or 100),500))
-    with con() as c: rows=c.execute('SELECT * FROM admin_logs ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
+    wh=[]; args=[]
+    if not is_super_admin(admin):
+        wh.append('admin_id=?'); args.append(int(admin['id']))
+    elif admin_id:
+        wh.append('admin_id=?'); args.append(int(admin_id))
+    if action:
+        wh.append('UPPER(action) LIKE ?'); args.append('%'+str(action).upper()[:60]+'%')
+    if date_from:
+        wh.append('created_at>=?'); args.append(str(date_from)[:10]+' 00:00:00')
+    if date_to:
+        wh.append('created_at<=?'); args.append(str(date_to)[:10]+' 23:59:59')
+    where=(' WHERE '+' AND '.join(wh)) if wh else ''
+    with con() as c:
+        rows=c.execute('SELECT * FROM admin_logs'+where+' ORDER BY id DESC LIMIT ?', (*args,limit)).fetchall()
     return [dict(r) for r in rows]
 
 @router.get('/api/admin-overview')
@@ -406,20 +419,28 @@ def backup_validate(filename:str, authorization: str|None = Header(default=None)
     return {'ok': True, 'filename': safe, 'engine': data.get('engine'), 'created_at': data.get('created_at'), 'table_counts': {k: len(v or []) for k, v in tables.items()}}
 
 @router.post('/api/backups/cleanup')
-def backup_cleanup(keep:int=20, authorization: str|None = Header(default=None)):
+def backup_cleanup(keep:int=30, request:Request=None, authorization: str|None = Header(default=None)):
     admin=require_admin(authorization); require_super_admin(admin)
-    keep = max(3, min(int(keep or 20), 100))
-    files = []
-    for pattern in ('BBLOTTO*_BACKUP_*.db', 'BBLOTTO*_BACKUP_*.json', 'BBLOTTO_RC3_BACKUP_*.json'):
-        files.extend(EXPORT_DIR.glob(pattern))
-    files = sorted(set(files), key=lambda x: x.stat().st_mtime, reverse=True)
-    removed=[]
-    for f in files[keep:]:
-        try:
-            removed.append(f.name); f.unlink()
-        except Exception:
-            _log_suppressed_exception("20_auth_admin_settings.py:403")
-    return {'ok': True, 'keep': keep, 'removed': removed, 'remaining': len(files)-len(removed)}
+    keep = max(3, min(int(keep or RC5_BACKUP_KEEP), 120))
+    removed=cleanup_old_backups(keep)
+    log_action(admin,'CLEANUP_BACKUPS',f'백업 정리: {len(removed)}개 삭제 / {keep}개 유지',request)
+    return {'ok': True, 'keep': keep, 'removed': removed}
+
+@router.get('/api/recovery/status')
+def recovery_status(authorization: str|None = Header(default=None)):
+    admin=require_admin(authorization); require_super_admin(admin)
+    ensure_daily_backup()
+    return rc5_recovery_status()
+
+@router.post('/api/recovery/run')
+def recovery_run(request:Request, authorization: str|None = Header(default=None)):
+    admin=require_admin(authorization); require_super_admin(admin)
+    before=rc5_recovery_status()
+    backup=create_db_backup('manual_recovery',admin)
+    removed=cleanup_old_backups(RC5_BACKUP_KEEP)
+    after=rc5_recovery_status()
+    log_action(admin,'RUN_RECOVERY_CHECK',f'복구 점검 완료 / 백업 {backup.get("filename")} / 정리 {len(removed)}개',request)
+    return {'ok':bool(after.get('ok')),'before':before,'backup':backup,'removed':removed,'after':after}
 
 @router.get('/api/rc3-4/status')
 def rc3_4_status(authorization: str|None = Header(default=None)):

@@ -591,6 +591,15 @@ def init_db():
         # RC3-3: 로그인 이력은 관리자 활동 로그와 별도 테이블로 영구 저장합니다.
         c.execute('CREATE TABLE IF NOT EXISTS login_logs(id INTEGER PRIMARY KEY AUTOINCREMENT, admin_id INTEGER DEFAULT 0, username TEXT DEFAULT "", success INTEGER DEFAULT 0, ip TEXT DEFAULT "", user_agent TEXT DEFAULT "", message TEXT DEFAULT "", created_at TEXT)')
         c.execute('CREATE TABLE IF NOT EXISTS backup_history(id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, reason TEXT DEFAULT "manual", size_bytes INTEGER DEFAULT 0, created_by INTEGER, created_at TEXT)')
+        backup_cols = table_cols(c, 'backup_history')
+        for col, ddl in {
+            'status':'TEXT DEFAULT "ok"',
+            'checksum':'TEXT DEFAULT ""',
+            'table_counts':'TEXT DEFAULT "{}"',
+            'error_message':'TEXT DEFAULT ""'
+        }.items():
+            if col not in backup_cols:
+                c.execute(f'ALTER TABLE backup_history ADD COLUMN {col} {ddl}')
         c.execute('CREATE TABLE IF NOT EXISTS members(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT DEFAULT "", grade TEXT DEFAULT "일반", memo TEXT DEFAULT "", created_by INTEGER, created_at TEXT)')
         c.execute("CREATE TABLE IF NOT EXISTS member_notes(id INTEGER PRIMARY KEY AUTOINCREMENT, member_id INTEGER, note TEXT DEFAULT '', note_type TEXT DEFAULT '상담', created_by INTEGER DEFAULT 0, created_by_name TEXT DEFAULT '', created_at TEXT)")
         # V34 Final Member Phase3: 기존 DB와 충돌 없이 필요한 컬럼만 추가
@@ -709,11 +718,22 @@ def init_db():
         _rc315_clean_future_draws_in_conn(c)
         c.commit()
 
+def _sanitize_log_detail(detail):
+    text = str(detail or '')[:1000]
+    text = re.sub(r'(?i)(password|passwd|token|secret|api[_ -]?key)\s*[:=]\s*[^,;\s]+', r'\1=[REDACTED]', text)
+    return text
+
+
 def log_action(admin, action, detail='', request: Request|None=None):
     ip = _rc113_client_ip(request) if request else ''
-    with con() as c:
-        c.execute('INSERT INTO admin_logs(admin_id,username,action,detail,ip,created_at) VALUES(?,?,?,?,?,?)', (admin.get('id') if admin else None, admin.get('username') if admin else '', action, detail, ip, now()))
-        c.commit()
+    safe_action = re.sub(r'[^A-Z0-9_:-]', '_', str(action or 'ACTIVITY').upper())[:80]
+    safe_detail = _sanitize_log_detail(detail)
+    try:
+        with con() as c:
+            c.execute('INSERT INTO admin_logs(admin_id,username,action,detail,ip,created_at) VALUES(?,?,?,?,?,?)', (admin.get('id') if admin else None, admin.get('username') if admin else '', safe_action, safe_detail, ip, now()))
+            c.commit()
+    except Exception:
+        _log_suppressed_exception('00_core.py:log_action')
 
 def log_login_event(admin_id=0, username='', success=0, message='', request: Request|None=None):
     """RC3-3: 로그인 성공/실패 이력을 PostgreSQL/SQLite에 공통 저장합니다."""
@@ -728,147 +748,208 @@ def log_login_event(admin_id=0, username='', success=0, message='', request: Req
         _log_suppressed_exception("00_core.py:689")
 
 
-# RC3-4: PostgreSQL/SQLite 공통 운영 백업 테이블 목록
+# RC5: PostgreSQL/SQLite 공통 운영 백업 및 장애 복구
 RC3_BACKUP_TABLES = [
     'admins', 'members', 'settings', 'draws', 'recommendations', 'winning_checks',
     'sms_logs', 'admin_logs', 'login_logs', 'backup_history', 'sessions',
     'engine_runs', 'dashboard_snapshots'
 ]
+RC5_REQUIRED_BACKUP_TABLES = {'admins', 'members', 'settings', 'draws'}
+RC5_BACKUP_KEEP = max(7, min(int(os.getenv('BBLOTTO_BACKUP_KEEP', '30') or 30), 120))
+_RC5_WORKER_STARTED = False
+_RC5_WORKER_LOCK = threading.Lock()
 
 
-def _safe_backup_filename(ext='json', label='BBLOTTO_RC3_BACKUP'):
-    stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+def _safe_backup_filename(ext='json', label='BBLOTTO_RC5_BACKUP'):
+    stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     ext = str(ext or 'json').lstrip('.')
     return f'{label}_{stamp}.{ext}'
 
 
 def _json_default(value):
-    try:
-        if isinstance(value, (datetime.datetime, datetime.date)):
-            return value.isoformat()
-    except Exception:
-        _log_suppressed_exception("00_core.py:711")
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
     return str(value)
 
 
+def _sha256_file(path: Path):
+    h = hashlib.sha256()
+    with path.open('rb') as f:
+        for block in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _record_backup_history(filename, reason, size, admin, status='ok', checksum='', table_counts=None, error_message=''):
+    try:
+        with con() as c:
+            c.execute(
+                'INSERT INTO backup_history(filename,reason,size_bytes,created_by,created_at,status,checksum,table_counts,error_message) VALUES(?,?,?,?,?,?,?,?,?)',
+                (filename, reason, int(size or 0), admin.get('id') if admin else None, now(), status, checksum, json.dumps(table_counts or {}, ensure_ascii=False), str(error_message or '')[:1000])
+            )
+            c.commit()
+    except Exception:
+        _log_suppressed_exception('00_core.py:_record_backup_history')
+
+
 def _backup_export_json(reason='manual', admin=None):
-    """PostgreSQL/SQLite 공통 JSON 백업 생성. DB 엔진과 무관하게 모든 운영 테이블을 보관합니다."""
+    """원자적 JSON 백업. 임시 파일 작성 후 검증에 통과해야 최종 파일로 교체합니다."""
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     filename = _safe_backup_filename('json')
     dest = EXPORT_DIR / filename
-    payload = {
-        'app': 'BBLOTTO PRO',
-        'version': 'RC3-4',
-        'engine': DB_ENGINE,
-        'created_at': now(),
-        'reason': reason,
-        'tables': {},
-    }
-    with con() as c:
-        for table in RC3_BACKUP_TABLES:
-            try:
-                rows = c.execute(f'SELECT * FROM {table}').fetchall()
-                payload['tables'][table] = [dict(r) for r in rows]
-            except Exception:
-                payload['tables'][table] = []
-    dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default), encoding='utf-8')
-    size = dest.stat().st_size if dest.exists() else 0
+    temp = EXPORT_DIR / f'.{filename}.tmp'
+    payload = {'app':'BBLOTTO PRO', 'version':'RC5', 'engine':DB_ENGINE, 'created_at':now(), 'reason':reason, 'tables':{}}
+    counts = {}
     try:
         with con() as c:
-            c.execute('INSERT INTO backup_history(filename,reason,size_bytes,created_by,created_at) VALUES(?,?,?,?,?)', (filename, reason, size, admin.get('id') if admin else None, now()))
-            c.commit()
-    except Exception:
-        _log_suppressed_exception("00_core.py:742")
-    return {'filename': filename, 'format': 'json', 'engine': DB_ENGINE, 'reason': reason, 'size_bytes': size, 'created_at': now()}
+            for table in RC3_BACKUP_TABLES:
+                try:
+                    rows = c.execute(f'SELECT * FROM {table}').fetchall()
+                    data = [dict(r) for r in rows]
+                except Exception:
+                    data = []
+                payload['tables'][table] = data
+                counts[table] = len(data)
+        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default), encoding='utf-8')
+        parsed = json.loads(temp.read_text(encoding='utf-8'))
+        if parsed.get('app') != 'BBLOTTO PRO' or not RC5_REQUIRED_BACKUP_TABLES.issubset(set((parsed.get('tables') or {}).keys())):
+            raise RuntimeError('백업 필수 테이블 검증 실패')
+        os.replace(temp, dest)
+        size = dest.stat().st_size
+        checksum = _sha256_file(dest)
+        _record_backup_history(filename, reason, size, admin, 'ok', checksum, counts, '')
+        return {'ok':True,'filename':filename,'format':'json','engine':DB_ENGINE,'reason':reason,'size_bytes':size,'checksum':checksum,'table_counts':counts,'created_at':now()}
+    except Exception as exc:
+        try:
+            temp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        _record_backup_history(filename, reason, 0, admin, 'failed', '', counts, str(exc))
+        raise
 
 
 def create_db_backup(reason='manual', admin=None):
-    """RC3-4 운영 백업.
-    - PostgreSQL: JSON 덤프 파일 생성
-    - SQLite: 기존 .db 복사 + JSON 백업 생성 가능 구조 유지
-    """
-    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    if DB_ENGINE == 'postgresql':
-        return _backup_export_json(reason, admin)
-    stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f'BBLOTTO_V34_BACKUP_{stamp}.db'
-    dest = EXPORT_DIR / filename
-    shutil.copy2(DB, dest)
-    size = dest.stat().st_size if dest.exists() else 0
-    try:
-        with con() as c:
-            c.execute('INSERT INTO backup_history(filename,reason,size_bytes,created_by,created_at) VALUES(?,?,?,?,?)', (filename, reason, size, admin.get('id') if admin else None, now()))
-            c.commit()
-    except Exception:
-        _log_suppressed_exception("00_core.py:764")
-    return {'filename': filename, 'format': 'sqlite_db', 'engine': DB_ENGINE, 'reason': reason, 'size_bytes': size, 'created_at': now()}
+    # 복원이 가능한 단일 형식을 사용해 DB 엔진별 동작 차이를 제거합니다.
+    return _backup_export_json(reason, admin)
 
 
 def _validate_backup_json(path: Path):
     if not path.exists() or path.suffix.lower() != '.json':
         raise HTTPException(400, 'JSON 백업 파일만 복원할 수 있습니다.')
     try:
-        data = json.loads(path.read_text(encoding='utf-8'))
+        raw = path.read_text(encoding='utf-8')
+        data = json.loads(raw)
     except Exception:
         raise HTTPException(400, '백업 JSON 파일을 읽을 수 없습니다.')
-    if not isinstance(data, dict) or not isinstance(data.get('tables'), dict):
+    if data.get('app') != 'BBLOTTO PRO' or not isinstance(data.get('tables'), dict):
         raise HTTPException(400, 'BBLOTTO 백업 형식이 아닙니다.')
+    missing = sorted(RC5_REQUIRED_BACKUP_TABLES - set(data['tables']))
+    if missing:
+        raise HTTPException(400, '필수 테이블이 누락된 백업입니다: ' + ', '.join(missing))
     return data
 
 
 def _restore_json_backup(path: Path, admin=None, request: Request|None=None):
     data = _validate_backup_json(path)
     tables = data.get('tables') or {}
-    restore_order = [t for t in reversed(RC3_BACKUP_TABLES) if t in tables]
+    # 복원 직전 안전 백업이 실패하면 원본 보호를 위해 복원을 중단합니다.
+    safety = create_db_backup('pre_restore', admin)
     inserted = {}
-    with con() as c:
-        for table in restore_order:
-            try:
-                c.execute(f'DELETE FROM {table}')
-            except Exception:
-                _log_suppressed_exception("00_core.py:790")
-        for table in RC3_BACKUP_TABLES:
-            rows = tables.get(table) or []
-            if not rows:
-                inserted[table] = 0
-                continue
-            cols = table_cols(c, table)
-            allowed = [col for col in rows[0].keys() if col in cols]
-            if not allowed:
-                inserted[table] = 0
-                continue
-            marks = ','.join(['?'] * len(allowed))
-            col_sql = ','.join(allowed)
-            count = 0
-            for row in rows:
-                vals = [row.get(col) for col in allowed]
-                try:
-                    c.execute(f'INSERT INTO {table}({col_sql}) VALUES({marks})', vals)
-                    count += 1
-                except Exception:
-                    _log_suppressed_exception("00_core.py:810")
-            inserted[table] = count
-        c.commit()
+    restore_tables = [t for t in RC3_BACKUP_TABLES if t in tables and t not in {'backup_history', 'sessions'}]
     try:
-        log_action(admin or {}, 'RESTORE_BACKUP', f'복원 완료: {path.name}', request)
-    except Exception:
-        _log_suppressed_exception("00_core.py:816")
-    return {'ok': True, 'restored_from': path.name, 'engine': DB_ENGINE, 'inserted': inserted, 'restored_at': now()}
+        with con() as c:
+            for table in reversed(restore_tables):
+                c.execute(f'DELETE FROM {table}')
+            for table in restore_tables:
+                rows = tables.get(table) or []
+                if not rows:
+                    inserted[table] = 0
+                    continue
+                cols = table_cols(c, table)
+                allowed = [col for col in rows[0].keys() if col in cols]
+                if not allowed:
+                    raise RuntimeError(f'{table} 테이블에 복원 가능한 컬럼이 없습니다.')
+                marks = ','.join(['?'] * len(allowed))
+                col_sql = ','.join(allowed)
+                for row in rows:
+                    c.execute(f'INSERT INTO {table}({col_sql}) VALUES({marks})', [row.get(col) for col in allowed])
+                inserted[table] = len(rows)
+            c.commit()
+    except Exception as exc:
+        logger.error('backup restore failed file=%s safety=%s', path.name, safety.get('filename'), exc_info=True)
+        raise HTTPException(500, f'복원에 실패하여 변경사항을 취소했습니다. 안전 백업: {safety.get("filename")}')
+    log_action(admin or {}, 'RESTORE_BACKUP', f'복원 완료: {path.name} / 안전백업: {safety.get("filename")}', request)
+    return {'ok':True,'restored_from':path.name,'safety_backup':safety.get('filename'),'engine':DB_ENGINE,'inserted':inserted,'restored_at':now()}
+
+
+def cleanup_old_backups(keep=RC5_BACKUP_KEEP):
+    keep = max(3, min(int(keep or RC5_BACKUP_KEEP), 120))
+    files = sorted(EXPORT_DIR.glob('BBLOTTO*_BACKUP_*.json'), key=lambda x: x.stat().st_mtime, reverse=True)
+    removed = []
+    for f in files[keep:]:
+        try:
+            f.unlink()
+            removed.append(f.name)
+        except Exception:
+            _log_suppressed_exception('00_core.py:cleanup_old_backups')
+    return removed
+
 
 def ensure_daily_backup():
-    """하루 1회 자동 백업. 실행 시 충돌 없이 보관만 합니다."""
+    """하루 1회 자동 백업과 보관 개수 정리."""
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     try:
         with con() as c:
-            r = c.execute('SELECT COUNT(*) c FROM backup_history WHERE reason=? AND created_at LIKE ?', ('auto_daily', today+'%')).fetchone()
-        if not r or r['c'] == 0:
+            r = c.execute("SELECT COUNT(*) c FROM backup_history WHERE reason='auto_daily' AND status='ok' AND created_at LIKE ?", (today+'%',)).fetchone()
+        if not r or int(r['c'] or 0) == 0:
             create_db_backup('auto_daily', None)
+        cleanup_old_backups(RC5_BACKUP_KEEP)
+        return True
     except Exception:
-        _log_suppressed_exception("00_core.py:828")
+        _log_suppressed_exception('00_core.py:ensure_daily_backup')
+        return False
+
+
+def rc5_recovery_status():
+    result = {'ok':True,'engine':DB_ENGINE,'database':str(DB),'backup_dir':str(EXPORT_DIR),'backup_keep':RC5_BACKUP_KEEP,'checks':{}}
+    try:
+        with con() as c:
+            if DB_ENGINE == 'sqlite':
+                row = c.execute('PRAGMA integrity_check').fetchone()
+                integrity = (row[0] if row else 'unknown')
+            else:
+                c.execute('SELECT 1')
+                integrity = 'ok'
+            counts = {}
+            for table in RC5_REQUIRED_BACKUP_TABLES:
+                counts[table] = int(c.execute(f'SELECT COUNT(*) c FROM {table}').fetchone()['c'])
+            last = c.execute("SELECT * FROM backup_history WHERE status='ok' ORDER BY id DESC LIMIT 1").fetchone()
+        result['checks']={'database_integrity':integrity,'table_counts':counts,'latest_backup':dict(last) if last else None}
+        result['ok'] = str(integrity).lower() == 'ok'
+    except Exception as exc:
+        result['ok']=False
+        result['error']=str(exc)
+    return result
+
+
+def _auto_backup_worker():
+    while True:
+        time.sleep(3600)
+        ensure_daily_backup()
+
+
+def start_auto_backup_worker():
+    global _RC5_WORKER_STARTED
+    with _RC5_WORKER_LOCK:
+        if _RC5_WORKER_STARTED:
+            return
+        _RC5_WORKER_STARTED = True
+        threading.Thread(target=_auto_backup_worker, name='bblotto-auto-backup', daemon=True).start()
 
 from backend.migration_runner import run_versioned_migrations
 run_versioned_migrations(con, init_db, logger, version=8)
 ensure_daily_backup()
+start_auto_backup_worker()
 
 from .repositories.session_repository import (
     delete_session as _repo_delete_session,
