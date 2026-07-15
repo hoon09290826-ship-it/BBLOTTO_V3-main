@@ -1684,42 +1684,12 @@ try:
     from .recommendation_engine import get_analysis_cache as _ai_v6_get_analysis_cache
     BBLOTTO_AI_V6_ENGINE_VERSION = 'BBLOTTO_RC10_AUTO_FULL_HISTORY'
 
-    @router.get('/api/ai-engine/v6-cache')
-    def ai_engine_v6_cache(authorization: str|None = Header(default=None), force: int = 0, target_round: int|None = None):
-        require_admin(authorization)
-        cache = _ai_v6_get_analysis_cache(bool(force), target_round=target_round)
-        return {
-            'ok': True,
-            'engine_version': cache.get('engine_version'),
-            'cache_storage': cache.get('cache_storage'),
-            'analysis_confirm': cache.get('analysis_confirm'),
-            'draw_count': cache.get('draw_count'),
-            'actual_count': cache.get('actual_count'),
-            'expected_count': cache.get('expected_count'),
-            'round_range': cache.get('round_range'),
-            'latest_round': cache.get('latest_round'),
-            'target_round': cache.get('target_round'),
-            'is_full_history': cache.get('is_full_history'),
-            'missing_rounds_count': cache.get('missing_rounds_count'),
-            'missing_rounds_sample': cache.get('missing_rounds_sample'),
-            'hot': cache.get('hot', [])[:12],
-            'cold': cache.get('cold', [])[:12],
-            'overdue': cache.get('overdue', [])[:12],
-            'cache_used': True,
-        }
+    # 구형 V6 캐시 API 등록은 제거했습니다. 아래 V13 호환 API가 동일 경로를 단일 등록합니다.
 except Exception as _v6_import_error:
     BBLOTTO_AI_V6_ENGINE_VERSION = 'BBLOTTO_AI_V6_IMPORT_FAILED'
     print('[BBLOTTO] AI V6 engine import failed:', _v6_import_error)
 
-try:
-    from .recommendation_engine import sync_official_full_history as _ai_v6_sync_official_full_history
-
-    @router.post('/api/ai-engine/v6-sync-full')
-    def ai_engine_v6_sync_full(authorization: str|None = Header(default=None), max_round: int|None = None):
-        require_admin(authorization)
-        return _ai_v6_sync_official_full_history(max_round=max_round)
-except Exception as _v6_sync_import_error:
-    print('[BBLOTTO] AI V6 sync endpoint failed:', _v6_sync_import_error)
+# 구형 V6 전체 동기화 API 등록은 제거했습니다. 아래 V13 호환 API가 동일 경로를 단일 등록합니다.
 
 
 # =========================================================
