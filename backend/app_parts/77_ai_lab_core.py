@@ -11,6 +11,11 @@ from .ai.ai_lab_core import (
     list_profiles as ai_lab_list_profiles,
     list_versions as ai_lab_list_versions,
 )
+from .ai.ai_lab_candidates import (
+    CANDIDATE_GENERATOR_VERSION,
+    generate_candidates as ai_lab_generate_candidates,
+    list_job_candidates as ai_lab_list_job_candidates,
+)
 from .ai.ai_lab_runner import (
     RUNNER_VERSION,
     cancel_job_with_run as ai_lab_cancel_job,
@@ -160,6 +165,36 @@ def ai_lab_job_cancel(job_id: int, request: Request, authorization: str | None =
         raise HTTPException(404, str(exc))
     log_action(admin, 'AI_LAB_JOB_CANCEL', f"AI LAB 학습 작업 #{job_id} 중단", request)
     return {'ok': True, 'item': item}
+
+
+@router.post('/api/ai-lab/jobs/{job_id}/generate-candidates')
+def ai_lab_job_generate_candidates(job_id: int, request: Request, force: bool = False, authorization: str | None = Header(default=None)):
+    admin = require_admin(authorization)
+    require_super_admin(admin)
+    try:
+        with con() as c:
+            result = ai_lab_generate_candidates(c, job_id, created_by=int(admin['id']), force=bool(force))
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.exception('AI LAB candidate generation failed: job_id=%s', job_id)
+        raise HTTPException(500, f'Candidate 가중치 생성 중 오류가 발생했습니다: {exc}')
+    log_action(admin, 'AI_LAB_CANDIDATES_GENERATE', f"AI LAB 작업 #{job_id} Candidate {result.get('created_count', 0)}개 생성", request)
+    return {'ok': True, 'generator_version': CANDIDATE_GENERATOR_VERSION, **result}
+
+
+@router.get('/api/ai-lab/jobs/{job_id}/candidates')
+def ai_lab_job_candidates(job_id: int, authorization: str | None = Header(default=None)):
+    admin = require_admin(authorization)
+    require_super_admin(admin)
+    try:
+        with con() as c:
+            items = ai_lab_list_job_candidates(c, job_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    return {'ok': True, 'items': items, 'count': len(items), 'operating_engine_changed': False}
 
 
 @router.get('/api/ai-lab/notes')
