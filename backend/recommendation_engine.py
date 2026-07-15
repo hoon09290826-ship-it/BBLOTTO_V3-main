@@ -391,6 +391,33 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         elif hot_count >= 3: archetype = "최근 흐름형"
         elif detail["pair_strength"] >= 2.5: archetype = "동반출현형"
         evidence = [_number_evidence(n, cache, weights) for n in combo]
+
+        # 최종 선택 조합과 가장 가까운 상위 대체 후보를 함께 저장합니다.
+        # 설명 엔진은 이 값을 사용해 “다른 후보 대신 왜 이 조합이 선택됐는지”를
+        # 실제 점수 차이와 교체 번호 기준으로 설명합니다.
+        alternative = None
+        for alt_combo, (alt_score, alt_detail) in ranked:
+            if alt_combo == combo:
+                continue
+            common = set(combo) & set(alt_combo)
+            if len(common) != 5:
+                continue
+            removed = sorted(set(combo) - set(alt_combo))
+            added = sorted(set(alt_combo) - set(combo))
+            alternative = {
+                "numbers": list(alt_combo),
+                "base_score": round(float(alt_score), 2),
+                "chosen_base_score": round(float(base_score), 2),
+                "score_advantage": round(float(base_score) - float(alt_score), 2),
+                "kept_number": removed[0] if removed else None,
+                "replaced_candidate": added[0] if added else None,
+                "common_count": len(common),
+                "sum": alt_detail.get("sum"),
+                "ac": alt_detail.get("ac"),
+                "pair_strength": alt_detail.get("pair_strength"),
+            }
+            break
+
         reasons = [
             f"최근·중기·전체 출현 흐름과 미출현 간격을 종합한 {archetype}",
             f"홀짝 {detail['odd']}:{detail['even']} · 구간 {detail['zones'][0]}-{detail['zones'][1]}-{detail['zones'][2]} · 합계 {detail['sum']}",
@@ -402,7 +429,16 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             "max_previous_overlap": overlap, "selection_rank": len(selected),
             "engine_version": ENGINE_VERSION, "engine": ENGINE_VERSION,
             "type": archetype, "strategy": archetype, "portfolio_type": archetype,
-            "number_evidence": evidence, "reasons": reasons, "reason": " / ".join(reasons), **detail,
+            "number_evidence": evidence, "alternative_candidate": alternative,
+            "selection_trace": {
+                "candidate_base_score": round(base_score, 2),
+                "portfolio_score": round(adjusted, 2),
+                "number_repeat_penalty": round(diversity_penalty, 2),
+                "combo_overlap_penalty": round(max(0, overlap - 2) * 4.5, 2),
+                "max_previous_overlap": overlap,
+                "candidate_rank": next((i + 1 for i, item in enumerate(ranked) if item[0] == combo), None),
+            },
+            "reasons": reasons, "reason": " / ".join(reasons), **detail,
         })
 
     # 드문 조건에서 후보가 부족하면 제약을 유지한 보완 생성
