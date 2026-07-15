@@ -187,7 +187,7 @@ def cancel_run(c: Any, run_id: int) -> Dict[str, Any]:
     return get_run(c, run_id)
 
 
-def process_step(c: Any, run_id: int, step_size: int = 2) -> Dict[str, Any]:
+def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Optional[Dict[str, Any]] = None, profile_label: str = "") -> Dict[str, Any]:
     ensure_backtest_tables(c)
     run = get_run(c, run_id)
     if run["status"] in {"completed", "cancelled"}:
@@ -216,7 +216,7 @@ def process_step(c: Any, run_id: int, step_size: int = 2) -> Dict[str, Any]:
         error = ""
         result: Dict[str, Any] = {}
         started = time.perf_counter()
-        seed = f"{BACKTEST_VERSION}|run:{run_id}|round:{target_round}|mode:{run['mode']}|count:{run['combo_count']}"
+        seed = f"{BACKTEST_VERSION}|run:{run_id}|round:{target_round}|mode:{run['mode']}|count:{run['combo_count']}|profile:{profile_label}"
         try:
             if len(history) < int(run["min_history"]):
                 status = "skipped"
@@ -230,6 +230,7 @@ def process_step(c: Any, run_id: int, step_size: int = 2) -> Dict[str, Any]:
                     member_grade="일반",
                     cache_override=cache,
                     deterministic_seed=seed,
+                    lab_weight_profile=weight_profile,
                 )
                 result = _evaluate(combos, details, target)
                 result["recommended_numbers"] = combos

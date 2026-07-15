@@ -79,6 +79,40 @@ def build_number_weights(cache: Dict[str, Any], mode: str = "balanced", grade: s
     return weights
 
 
+
+def build_number_weights_profile(cache: Dict[str, Any], profile: Dict[str, Any], mode: str = "balanced", grade: str = "일반") -> Dict[int, float]:
+    """Build number weights from an AI LAB profile without changing live defaults."""
+    required = {"recent_10", "recent_30", "recent_100", "full_history", "momentum", "overdue", "pair", "combo_balance"}
+    clean = {str(k): float(v) for k, v in (profile or {}).items() if str(k) in required}
+    if set(clean) != required or not 0.99 <= sum(clean.values()) <= 1.01:
+        raise ValueError("AI LAB 가중치 프로필 형식이 올바르지 않습니다.")
+    f10 = _normalize({n: _value(cache.get("frequency10", {}), n) for n in range(1, 46)})
+    f30 = _normalize({n: _value(cache.get("frequency30", {}), n) for n in range(1, 46)})
+    f100 = _normalize({n: _value(cache.get("frequency100", {}), n) for n in range(1, 46)})
+    fall = _normalize({n: _value(cache.get("frequency_all", {}), n) for n in range(1, 46)})
+    momentum = _normalize({n: _value(cache.get("momentum", {}), n) for n in range(1, 46)})
+    overdue = _normalize({n: min(30.0, _value(cache.get("gap", {}), n)) for n in range(1, 46)})
+    pairs = cache.get("pair_counts", {})
+    pair_raw = {}
+    for n in range(1, 46):
+        pair_raw[n] = sum(float(pairs.get(f"{min(n,m)}-{max(n,m)}", 0) or 0) for m in range(1,46) if m != n)
+    pair_norm = _normalize(pair_raw)
+    base = build_number_weights(cache, mode=mode, grade=grade)
+    base_norm = _normalize(base)
+    out = {}
+    for n in range(1,46):
+        combined = (
+            clean["recent_10"] * f10[n] + clean["recent_30"] * f30[n] +
+            clean["recent_100"] * f100[n] + clean["full_history"] * fall[n] +
+            clean["momentum"] * momentum[n] + clean["overdue"] * overdue[n] +
+            clean["pair"] * pair_norm[n] + clean["combo_balance"] * base_norm[n]
+        )
+        score = 16.0 + 84.0 * max(0.0, min(1.0, combined))
+        if str(grade or "") == "1등": score = score ** 1.075
+        elif str(grade or "") == "2등": score = score ** 1.035
+        out[n] = max(0.01, score)
+    return out
+
 def pair_strength(numbers: Sequence[int], cache: Dict[str, Any]) -> float:
     pairs = cache.get("pair_counts", {})
     values = [float(pairs.get(f"{a}-{b}", 0) or 0) for a, b in combinations(sorted(numbers), 2)]

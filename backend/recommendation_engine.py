@@ -22,6 +22,7 @@ from .ai.member_history import load_member_profile as _load_member_profile, memb
 from .ai.score_engine import (
     SCORE_ENGINE_VERSION,
     build_number_weights as _build_number_weights,
+    build_number_weights_profile as _build_number_weights_profile,
     pair_strength as _score_pair_strength,
     score_combo as _score_combo_v13,
     triple_strength as _score_triple_strength,
@@ -459,7 +460,7 @@ def _portfolio_adjustment(
         "usage_soft_cap": float(soft_cap),
     }
 
-def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None, *, cache_override: Optional[Dict[str, Any]] = None, deterministic_seed: Optional[str] = None):
+def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None, *, cache_override: Optional[Dict[str, Any]] = None, deterministic_seed: Optional[str] = None, lab_weight_profile: Optional[Dict[str, Any]] = None):
     started = time.perf_counter()
     target = max(1, min(50, int(count or 10)))
     fixed_nums = _parse_nums(fixed)
@@ -470,7 +471,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         raise ValueError("제외수가 너무 많습니다.")
 
     cache = cache_override if cache_override is not None else get_analysis_cache(False)
-    weights = _mode_weights(cache, mode, member_grade)
+    weights = _build_number_weights_profile(cache, lab_weight_profile, mode=mode, grade=member_grade) if lab_weight_profile else _mode_weights(cache, mode, member_grade)
     member_profile = _load_member_profile(_resolve_primary_db_path(), member_id) if member_id and cache_override is None else {"enabled": False, "member_id": int(member_id or 0), "strategy_adjustments": {}}
     seed_basis = deterministic_seed if deterministic_seed is not None else str(time.time_ns())
     seed_text = f"{seed_basis}|{member_id}|{member_grade}|{mode}|{fixed_nums}|{sorted(excluded_nums)}|{cache.get('latest_round')}"
@@ -682,6 +683,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         "generation_ms": elapsed, "candidate_count": len(pool), "attempts": attempts,
         "hot": cache.get("hot", [])[:12], "cold": cache.get("cold", [])[:12], "overdue": cache.get("overdue", [])[:12],
         "unique_numbers": len(usage), "max_number_use": max(usage.values(), default=0),
+        "ai_lab_profile_applied": bool(lab_weight_profile),
         "member_adaptation": {"enabled": bool(member_profile.get("enabled")), "member_id": int(member_id or 0), "evaluated_runs": int(member_profile.get("evaluated_runs", 0) or 0), "confidence": float(member_profile.get("confidence", 0) or 0), "best_strategy": member_profile.get("best_strategy") or "균형형", "safety": member_profile.get("safety") or {}},
         "methodology": ["AI-01 영구 캐시 기반", "1회차~최신 회차 전체 분석", "최근 10·30·50·100·300회 다중 가중치", "미출현 간격·모멘텀", "동반출현·트리플", "홀짝·구간·합계·AC·끝수", "조합 간 중복 억제", "전략별 포트폴리오 재평가", "번호 반복·구간 편중 동적 보정"],
     }

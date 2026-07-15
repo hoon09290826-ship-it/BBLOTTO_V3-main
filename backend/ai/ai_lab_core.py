@@ -5,7 +5,7 @@ import hashlib
 import json
 from typing import Any, Dict, List, Optional
 
-AI_LAB_SCHEMA_VERSION = "RC6_D1_3"
+AI_LAB_SCHEMA_VERSION = "RC6_D1_4"
 DEFAULT_PROFILE_NAME = "RC4.5 Stable Baseline"
 DEFAULT_WEIGHTS: Dict[str, float] = {
     "recent_10": 0.20,
