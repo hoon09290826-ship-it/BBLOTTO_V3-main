@@ -144,9 +144,15 @@ def _gaps(draws: Sequence[Dict[str, Any]]) -> Dict[int, int]:
     return {n: latest if last[n] < 0 else latest - 1 - last[n] for n in range(1, 46)}
 
 
-def _build_cache() -> Dict[str, Any]:
+def _build_cache(draws_override: Optional[Sequence[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Build an analysis cache from a supplied historical prefix or the live DB.
+
+    ``draws_override`` is used by the backtest engine so a target round can
+    never see future winning numbers. Live recommendation calls remain
+    unchanged and continue to use the persistent cache.
+    """
     started = time.perf_counter()
-    draws = _load_draws()
+    draws = list(draws_override) if draws_override is not None else _load_draws()
     latest_round = draws[-1]["round"] if draws else 0
     windows = (10, 30, 50, 100, 300)
     freqs = {w: _frequency(draws, w) for w in windows}
@@ -447,7 +453,7 @@ def _portfolio_adjustment(
         "usage_soft_cap": float(soft_cap),
     }
 
-def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None):
+def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None, *, cache_override: Optional[Dict[str, Any]] = None, deterministic_seed: Optional[str] = None):
     started = time.perf_counter()
     target = max(1, min(50, int(count or 10)))
     fixed_nums = _parse_nums(fixed)
@@ -457,9 +463,10 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
     if len(set(range(1, 46)) - excluded_nums) < 6:
         raise ValueError("제외수가 너무 많습니다.")
 
-    cache = get_analysis_cache(False)
+    cache = cache_override if cache_override is not None else get_analysis_cache(False)
     weights = _mode_weights(cache, mode, member_grade)
-    seed_text = f"{time.time_ns()}|{member_id}|{member_grade}|{mode}|{fixed_nums}|{sorted(excluded_nums)}|{cache.get('latest_round')}"
+    seed_basis = deterministic_seed if deterministic_seed is not None else str(time.time_ns())
+    seed_text = f"{seed_basis}|{member_id}|{member_grade}|{mode}|{fixed_nums}|{sorted(excluded_nums)}|{cache.get('latest_round')}"
     rng = random.Random(int(hashlib.sha256(seed_text.encode()).hexdigest()[:16], 16))
 
     candidate_target = min(1800, max(180, target * 45))
@@ -663,6 +670,12 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         "methodology": ["AI-01 영구 캐시 기반", "1회차~최신 회차 전체 분석", "최근 10·30·50·100·300회 다중 가중치", "미출현 간격·모멘텀", "동반출현·트리플", "홀짝·구간·합계·AC·끝수", "조합 간 중복 억제", "전략별 포트폴리오 재평가", "번호 반복·구간 편중 동적 보정"],
     }
     return selected[:target], selected_details[:target], stats
+
+
+
+def build_backtest_cache(draws: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Public, side-effect free cache builder for walk-forward backtests."""
+    return _build_cache(draws_override=draws)
 
 
 def _official_fetch(round_no: int, timeout: int = 4) -> Optional[Dict[str, Any]]:

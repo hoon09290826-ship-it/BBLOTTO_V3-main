@@ -16,6 +16,7 @@ _FEATURE_PARTS = (
     ("50_winning_draws_stats.py", "winning-stats"),
     ("60_exports.py", "exports"),
     ("70_ai_engine.py", "ai-engine"),
+    ("75_backtest.py", "backtest"),
     ("80_dashboards_operations.py", "dashboards-operations"),
     ("90_release_rc3.py", "release-rc3"),
     ("95_engine_runtime.py", "engine-runtime"),
