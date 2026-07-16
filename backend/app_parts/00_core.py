@@ -280,6 +280,14 @@ class PgCursorCompat:
         s = re.sub(r'INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT', 'SERIAL PRIMARY KEY', s, flags=re.I)
         s = s.replace('INSERT OR IGNORE INTO', 'INSERT INTO')
         s = s.replace('INSERT OR REPLACE INTO', 'INSERT INTO')
+        # SQLite accepts double-quoted string defaults, but PostgreSQL treats
+        # double quotes as identifier quotes. Convert every DEFAULT "text"
+        # literal generically so new columns never fail with
+        # `cannot use column reference in DEFAULT expression`.
+        def _pg_default_literal(match):
+            value = match.group(1).replace("'", "''")
+            return f"DEFAULT '{value}'"
+        s = re.sub(r'DEFAULT\s+"([^"]*)"', _pg_default_literal, s, flags=re.I)
         s = s.replace('DEFAULT ""', "DEFAULT ''")
         s = s.replace('DEFAULT "관리자"', "DEFAULT '관리자'")
         s = s.replace('DEFAULT "전체권한"', "DEFAULT '전체권한'")
