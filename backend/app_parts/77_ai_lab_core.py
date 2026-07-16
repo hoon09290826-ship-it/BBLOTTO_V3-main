@@ -44,17 +44,46 @@ from .ai.ai_lab_activation import (
 
 
 def _ai_lab_latest_admin_backtest(c):
+    """Return the newest usable admin backtest, including in-progress runs.
+
+    AI LAB previously linked only ``completed`` runs, so a newly started or
+    partially processed backtest appeared disconnected until every round had
+    finished.  Keep failed/cancelled runs out, but expose ready/running and
+    completed runs together with progress and the currently available summary.
+    """
     try:
-        row=c.execute("SELECT * FROM backtest_runs WHERE status='completed' ORDER BY id DESC LIMIT 1").fetchone()
+        row = c.execute(
+            "SELECT * FROM backtest_runs "
+            "WHERE status NOT IN ('failed','cancelled') "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
         if not row:
             return {}
-        run=dict(row)
+
+        run = dict(row)
+        processed = int(run.get('processed_rounds') or 0)
+        total = int(run.get('total_rounds') or 0)
+        progress = round((processed / total) * 100, 2) if total > 0 else 0.0
+
         try:
-            summary=rc6_get_summary(c, int(run['id']))
+            summary_data = rc6_get_summary(c, int(run['id'])) or {}
         except Exception:
-            summary={}
-        return {'run':run,'summary':summary.get('summary',{}),'by_window':summary.get('by_window',{}),'backtest_version':summary.get('backtest_version',run.get('backtest_version',''))}
+            logger.exception('AI LAB backtest intermediate summary failed: run_id=%s', run.get('id'))
+            summary_data = {}
+
+        return {
+            'run': run,
+            'status': str(run.get('status') or 'ready'),
+            'is_completed': str(run.get('status') or '') == 'completed',
+            'processed_rounds': processed,
+            'total_rounds': total,
+            'progress_percent': progress,
+            'summary': summary_data.get('summary', {}),
+            'by_window': summary_data.get('by_window', {}),
+            'backtest_version': summary_data.get('backtest_version', run.get('backtest_version', '')),
+        }
     except Exception:
+        logger.exception('AI LAB backtest link lookup failed')
         return {}
 
 @router.get('/api/ai-lab/backtest-link')
@@ -150,12 +179,19 @@ def ai_lab_job_create(req: AiLabJobReq, request: Request, authorization: str | N
             if linked_backtest:
                 current_result = item.get('result') if isinstance(item, dict) else {}
                 if not isinstance(current_result, dict): current_result={}
-                current_result['admin_backtest_link']={
-                    'run_id':int(linked_backtest.get('run',{}).get('id') or 0),
-                    'completed_at':linked_backtest.get('run',{}).get('completed_at') or '',
-                    'engine_version':linked_backtest.get('run',{}).get('engine_version') or '',
-                    'backtest_version':linked_backtest.get('backtest_version') or '',
-                    'summary':linked_backtest.get('summary') or {}
+                current_result['admin_backtest_link'] = {
+                    'run_id': int(linked_backtest.get('run', {}).get('id') or 0),
+                    'status': linked_backtest.get('status') or 'ready',
+                    'is_completed': bool(linked_backtest.get('is_completed')),
+                    'processed_rounds': int(linked_backtest.get('processed_rounds') or 0),
+                    'total_rounds': int(linked_backtest.get('total_rounds') or 0),
+                    'progress_percent': float(linked_backtest.get('progress_percent') or 0),
+                    'started_at': linked_backtest.get('run', {}).get('started_at') or '',
+                    'completed_at': linked_backtest.get('run', {}).get('completed_at') or '',
+                    'engine_version': linked_backtest.get('run', {}).get('engine_version') or '',
+                    'backtest_version': linked_backtest.get('backtest_version') or '',
+                    'summary': linked_backtest.get('summary') or {},
+                    'by_window': linked_backtest.get('by_window') or {},
                 }
                 c.execute('UPDATE ai_learning_jobs SET result_json=?,updated_at=? WHERE id=?',(json.dumps(current_result,ensure_ascii=False),now(),int(item['id'])))
                 c.commit()
