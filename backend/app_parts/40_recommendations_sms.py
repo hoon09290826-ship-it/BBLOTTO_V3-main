@@ -23,7 +23,8 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     # 프론트에서는 회원 선택을 안내하여 이후 당첨확인에서 '회원 선택 없음'이 나오지 않도록 합니다.
     excluded_value = req.excluded or req.exclude or ''
     safe_count=max(1, min(50, int(req.count or 10)))
-    safe_round=max(1, int(req.round_no or 1))
+    _latest_for_generation = int((latest_stats(1) or {}).get('latest_round') or 0)
+    safe_round=max(1, int(req.round_no or (_latest_for_generation + 1 if _latest_for_generation else expected_lotto_round())))
     safe_mode=req.mode or 'balanced'
     combos, details, st = make_premium_combos(safe_count, req.fixed, excluded_value, safe_mode, member_grade, member_id=member_id, lab_weight_profile=(stable_lab.get('weights') or None))
     # RC7-1: 회원별 AI 엔진 V2 문구/번호 분산용 회원 시드 정보

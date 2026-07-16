@@ -117,6 +117,7 @@ async function setNextDrawRound(){
       const genText=d.next_round ? `추천생성 ${d.next_round}회` : '';
       $('autoRoundInfo').textContent = `${latestText} · ${checkText} · ${genText}${msg ? ' / '+msg : ''}`;
     }
+    nextGenerationRound = Number(d.next_round || d.expected_round || d.latest_round || 0);
     if(d.next_round) currentRound = d.next_round;
     else if(d.expected_round) currentRound = d.expected_round;
     else if(d.latest_round) currentRound = d.latest_round;

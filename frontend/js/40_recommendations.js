@@ -61,6 +61,7 @@ window.generateMemberAndCopy = safe(async function(id, btn){
     if(!String(currentAnalysis||'').trim()) throw new Error('분석요약 생성 확인에 실패했습니다.');
     const text = ($('smsPreview')?.value || currentSms || '').trim();
     await copyTextToClipboard(text);
+    showMemberQuickResult(m, currentCombos, currentAnalysis, true, false);
     toast(`${m.name} ${expected}조합 생성·분석·문자 복사 완료`);
     if(btn) btn.textContent='복사완료';
     setTimeout(()=>{ if(btn){ btn.textContent=oldText || `${getMemberPreferredCount(m)}조합`; btn.disabled=false; } }, 1200);
@@ -89,6 +90,7 @@ window.generateMemberCopyAndSave = safe(async function(id, btn){
     await saveCurrentSmsLog();
     await Promise.all([loadDashboard(), loadMembers()]);
     if($('genMember')) $('genMember').value=String(id);
+    showMemberQuickResult(m, currentCombos, currentAnalysis, true, true);
     toast(`${m.name} ${getMemberPreferredCount(m)}조합 문자 복사 + 보낸문자 저장 완료`);
     if(btn) btn.textContent='저장완료';
     setTimeout(()=>{ if(btn){ btn.textContent=oldText || '복사저장'; btn.disabled=false; } }, 1200);
@@ -200,9 +202,13 @@ function refreshSmsPreview(){
 async function generate(){
   const selectedMemberId=$('genMember')?.value||'';
   applySelectedMemberPreferredCount();
-  const next=await setNextDrawRound();
-  // STAGE8: generation API already reads the latest DB statistics; avoid a duplicate blocking request.
-  const defaultRound = Number(next?.next_round || next?.latest_round || 0) || undefined;
+  // 생성 버튼에서 별도 회차 API를 기다리지 않습니다. 초기 로딩 값/통계 캐시를 우선 사용하고,
+  // 값이 없을 때만 회차 API를 조회해 체감 지연을 줄입니다.
+  let defaultRound = Number(nextGenerationRound || latestStatsCache?.next_round || 0) || undefined;
+  if(!defaultRound){
+    const next=await setNextDrawRound();
+    defaultRound = Number(next?.next_round || next?.latest_round || 0) || undefined;
+  }
   const body={
     member_id:selectedMemberId ? Number(selectedMemberId) : null,
     round_no: defaultRound,

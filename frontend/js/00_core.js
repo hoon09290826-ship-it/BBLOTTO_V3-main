@@ -36,6 +36,7 @@ let currentSms = '';
 let currentAnalysis = '';
 let currentRecommendationAnalysis = '';
 let currentRound = '';
+let nextGenerationRound = 0;
 let currentRecId = null;
 let membersCache = [];
 let memberFilteredCache = [];

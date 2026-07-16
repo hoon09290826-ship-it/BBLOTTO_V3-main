@@ -290,7 +290,7 @@ def latest_stats(limit=120):
         'odd_ratio':odd_total/(max(1,len(draws[:30])*6)),
         'avg_sum30':round(sum(sums)/len(sums),1) if sums else 0,
         'avg_ac30':round(sum(acs)/len(acs),1) if acs else 0,
-        'latest_round':draws[0]['round_no'] if draws else 1230,
+        'latest_round':draws[0]['round_no'] if draws else 0,
     }
 
 def _ai_weight_pool(st, mode='balanced'):

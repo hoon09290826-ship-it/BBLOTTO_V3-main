@@ -334,7 +334,7 @@ def latest_stats(limit=100):
         'last_seen':last_seen,'hot':hot,'mid':mid,'cold':cold,'overdue':overdue,'top_pairs':top_pairs,'pair_counts':pair_counts,
         'end_counts':end_counts,'zone_counts':zone_counts,'odd_ratio':odd_total/(max(1,len(draws[:100])*6)),
         'sum_avg':round(sum(sums)/len(sums),1) if sums else 0,'recent_numbers':recent_numbers,
-        'latest_round':draws[0]['round_no'] if draws else 1230
+        'latest_round':draws[0]['round_no'] if draws else 0
     }
 
 def ac_value(combo):

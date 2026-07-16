@@ -1347,7 +1347,7 @@ def latest_stats(limit=100):
         'last_seen':last_seen,'hot':hot,'mid':mid,'cold':cold,'overdue':overdue,'top_pairs':top_pairs,'pair_counts':pair_counts,
         'end_counts':end_counts,'zone_counts':zone_counts,'odd_ratio':odd_total/(max(1,len(draws[:100])*6)),
         'sum_avg':round(sum(sums)/len(sums),1) if sums else 0,'recent_numbers':recent_numbers,
-        'latest_round':draws[0]['round_no'] if draws else 1230
+        'latest_round':draws[0]['round_no'] if draws else 0
     }
 
 def ac_value(combo):
@@ -1697,7 +1697,7 @@ class MemberStatusReq(BaseModel): status:str; memo:str|None=None
 class MemberMemoReq(BaseModel): memo:str=''
 class MemberNoteReq(BaseModel): note:str; note_type:str='상담'
 class MemberBulkStatusReq(BaseModel): member_ids:list[int]; status:str
-class GenerateReq(BaseModel): member_id:int|None=None; round_no:int=1232; count:int=10; mode:str='balanced'; fixed:str=''; excluded:str=''; exclude:str='' # exclude는 기존 프론트 호환용
+class GenerateReq(BaseModel): member_id:int|None=None; round_no:int|None=None; count:int=10; mode:str='balanced'; fixed:str=''; excluded:str=''; exclude:str='' # exclude는 기존 프론트 호환용
 class SaveRecommendationReq(BaseModel): member_id:int|None=None; member_name:str=''; round_no:int; mode:str='balanced'; combos:list[list[int]]=[]; analysis:str=''; sms:str=''; details:list[dict]=[]; engine:dict={}
 class SmsReq(BaseModel): member_id:int|None=None; member_name:str=''; phone:str=''; round_no:int; body:str; combos:list[list[int]]=[]; send_now:bool=False
 class WinReq(BaseModel): round_no:int; win_numbers:list[int]=[]; bonus:int=0; combos:list[list[int]]=[]; member_id:int|None=None; member_name:str=''

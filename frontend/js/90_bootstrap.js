@@ -51,7 +51,11 @@ function bind(){
   $('genMember')?.addEventListener('change',saveWorkspaceState);
   $('genCount')?.addEventListener('change',saveWorkspaceState);
   $('genMode')?.addEventListener('change',saveWorkspaceState);
-  $('copyNums')?.addEventListener('click',()=>{navigator.clipboard?.writeText(currentCombos.map((a,i)=>`${i+1}. ${a.join(', ')}`).join('\n')); toast('번호를 복사했습니다.');});
+  $('copyNums')?.addEventListener('click',safe(async()=>{
+    const text=currentCombos.map((a,i)=>`${i+1}. ${a.join(', ')}`).join('\n');
+    await copyTextToClipboard(text);
+    toast('번호를 복사했습니다.');
+  }));
   $('copySms')?.addEventListener('click',async()=>{try{await copyTextToClipboard($('smsPreview')?.value||currentSms); toast('회원 안내 문구를 복사했습니다.');}catch(e){alert(e.message||'복사 실패');}});
   $('copyAndSaveSmsLog')?.addEventListener('click',copyAndSaveSmsLog);
   $('saveRecommendationOnly')?.addEventListener('click',saveRecommendationOnly);
@@ -64,18 +68,6 @@ function bind(){
   $('bulkSmsTemplate')?.addEventListener('input',()=>{ saveWorkspaceState(); setText('smsExportInfo','수정한 문구가 CSV/복사에 적용됩니다.'); });
   if(typeof initSmsSegments === 'function') initSmsSegments();
   $('smsCsvScope')?.addEventListener('change',()=>{ refreshSmsScopeInfo(); if(typeof refreshSmsSegmentPreview === 'function') refreshSmsSegmentPreview(); setText('smsExportInfo', getSmsScopeLabel(getSmsScopeValue()) + ' 기준으로 파일이 생성됩니다.'); });
-  if(!window.__bbSmsExportDelegatedClickBound){
-    window.__bbSmsExportDelegatedClickBound=true;
-    document.addEventListener('click', function(e){
-      const btn=e.target && e.target.closest ? e.target.closest('button') : null;
-      if(!btn) return;
-      const id=btn.id || '';
-      if(id==='exportSmsCsvAll'){ e.preventDefault(); downloadSmsCsv('all'); return; }
-      if(id==='exportSmsCsvSelected'){ e.preventDefault(); downloadSmsCsv('selected'); return; }
-      if(id==='copySmsBulk'){ e.preventDefault(); copyBulkSmsText(); return; }
-      if(id==='applyBulkTemplate'){ e.preventDefault(); applyBulkTemplateToPreview(); return; }
-    });
-  }
   $('checkWinning')?.addEventListener('click',safe(checkWinning));
   $('saveDraw')?.addEventListener('click',safe(saveDraw));
   $('searchDraw')?.addEventListener('click',safe(searchDrawByRound));
@@ -88,33 +80,6 @@ function bind(){
   $('adminCreateModal')?.addEventListener('click',e=>{ if(e.target && e.target.id==='adminCreateModal') closeAdminCreateModal(); });
   document.querySelectorAll('.admin-tab-btn').forEach(b=>b.addEventListener('click',()=>switchAdminPanel(b.dataset.adminPanel)));
 
-  // RC5.4 FIX: 관리자 모달 버튼은 onclick/직접 바인딩에 의존하지 않고
-  // 버블 단계 이벤트 위임으로 처리한다. pointerdown preventDefault는 제거했다.
-  if(!window.__bbAdminDelegatedClickBound){
-    window.__bbAdminDelegatedClickBound=true;
-    document.addEventListener('click', function(e){
-      const btn=e.target && e.target.closest ? e.target.closest('button') : null;
-      if(!btn) return;
-      const id=btn.id || '';
-      if(id==='openAdminModal'){
-        e.preventDefault(); openAdminCreateModal(); return;
-      }
-      if(id==='closeAdminModal' || id==='cancelAdminModal'){
-        e.preventDefault(); closeAdminCreateModal(); return;
-      }
-      if(id==='addAdmin'){
-        e.preventDefault(); window.addAdmin ? window.addAdmin() : safe(addAdmin)(); return;
-      }
-      if(btn.classList && btn.classList.contains('admin-tab-btn')){
-        e.preventDefault(); switchAdminPanel(btn.dataset.adminPanel || 'admins'); return;
-      }
-    });
-    document.addEventListener('click', function(e){
-      const modal=$('adminCreateModal');
-      if(modal && modal.style.display!=='none' && e.target===modal) closeAdminCreateModal();
-    });
-    document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeAdminCreateModal(); });
-  }
   $('saveSessionTimeout')?.addEventListener('click',safe(saveSessionTimeout));
   $('createBackup')?.addEventListener('click',safe(createBackup));
   $('rc44AutoUpdate')?.addEventListener('click',safe(rc44RunAutoUpdate));
