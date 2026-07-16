@@ -210,8 +210,10 @@ function engineLabel(d){
   const g = memberGradeLabel(d?.member_grade || d?.grade || '일반');
   return d?.engine_label || (g === '1등' ? 'AI MASTER' : (g === '2등' ? 'AI PREMIUM' : 'AI BASIC'));
 }
-function starLabel(d){ const s=Number(d?.score ?? d?.vip_score ?? d?.ai_score ?? 0); return s>=97?'★★★★★':(s>=94?'★★★★☆':'★★★★'); }
-function top3FromDetails(sets, details=[]){ return (sets||[]).map((nums,i)=>({nums, detail:details[i]||{}, idx:i+1})).sort((a,b)=>Number(b.detail.score||0)-Number(a.detail.score||0)).slice(0,3); }
+function displayScoreOf(d){ const v=d?.display_score ?? d?.score ?? d?.vip_score ?? d?.ai_score ?? 0; const n=Number(v); return Number.isFinite(n)?n:0; }
+function starLabel(d){ const s=displayScoreOf(d); return s>=95?'★★★★★':(s>=90?'★★★★☆':(s>=85?'★★★★':(s>=80?'★★★☆':'★★★'))); }
+function qualityLabel(d){ return d?.quality_grade || (displayScoreOf(d)>=95?'S+':(displayScoreOf(d)>=90?'S':(displayScoreOf(d)>=85?'A+':(displayScoreOf(d)>=80?'A':'B')))); }
+function top3FromDetails(sets, details=[]){ return (sets||[]).map((nums,i)=>({nums, detail:details[i]||{}, idx:i+1})).sort((a,b)=>displayScoreOf(b.detail)-displayScoreOf(a.detail)).slice(0,3); }
 function parseNumsInput(v){ return String(v||'').match(/\d+/g)?.map(Number).filter(n=>n>=1&&n<=45) || []; }
 function getSelectedMember(){ const id=String($('genMember')?.value||''); return membersCache.find(m=>String(m.id)===id) || null; }
 function getMemberPreferredCount(m){
@@ -321,7 +323,7 @@ function normalizeText(value){
     ['reasons','reason','tags','points','items','warnings','notes','lines'].forEach(k=>{
       if(Array.isArray(value[k]) && value[k].length) parts.push(value[k].map(x=>'• '+normalizeText(x)).join('\n'));
     });
-    if(value.score || value.ai_score || value.avg_score) parts.push(`AI SCORE ${value.score || value.ai_score || value.avg_score}`);
+    if(value.display_score || value.score || value.ai_score || value.avg_score) parts.push(`AI SCORE ${value.display_score || value.score || value.ai_score || value.avg_score}`);
     return parts.filter(Boolean).join('\n');
   }
   return String(value);
@@ -391,7 +393,7 @@ function getDefaultTemplate(){
   return '안녕하세요 {회원명}님, BBLOTTO입니다.\n\n{회차}회차 추천번호 안내드립니다.\n\n[추천번호]\n{추천번호}\n\n[AI 분석 요약]\n{분석}\n\nAI SCORE: {AI점수}\n최근 데이터와 조합 균형을 기준으로 선별했습니다.\n좋은 결과 있으시길 바랍니다.\n\n발송일: {발송일}';
 }
 function getBestAiScore(){
-  const scores = (currentDetails || []).map(d=>Number(d.score ?? d.vip_score ?? d.ai_score ?? 0)).filter(Boolean);
+  const scores = (currentDetails || []).map(d=>displayScoreOf(d)).filter(Boolean);
   if(!scores.length) return '-';
   return Math.max(...scores).toFixed(1);
 }
@@ -437,19 +439,19 @@ function renderCombos(sets, details=[]){
   box.classList.remove('empty');
   const top3 = top3FromDetails(sets, details);
   const topHtml = `<div class="top3-panel rc38-top3"><h4>TOP 3 우선 추천 <small>AI Engine V1.0</small></h4><div class="top3-grid">${top3.map(t=>{
-    const d=t.detail||{}; const score=Number(d.score ?? d.vip_score ?? d.ai_score ?? 0);
+    const d=t.detail||{}; const score=displayScoreOf(d);
     const nums=(t.nums||[]).map(n=>`<span class="mini-ball ${ballClass(n)}">${n}</span>`).join('');
-    return `<div class="top3-card"><b>${t.idx}조합</b><div class="mini-nums">${nums}</div><span>${gradeLabel(d)} · ${engineLabel(d)}</span><strong>${score?score.toFixed(1):'-'}점</strong><em>${starLabel(d)}</em></div>`;
+    return `<div class="top3-card"><b>${t.idx}조합</b><div class="mini-nums">${nums}</div><span>${gradeLabel(d)} · ${engineLabel(d)} · 품질 ${qualityLabel(d)}</span><strong>${score?score.toFixed(1):'-'}점</strong><em>${starLabel(d)}</em></div>`;
   }).join('')}</div></div>`;
   const cards = sets.map((arr,i)=>{
     const d = details[i] || {};
-    const score = d.score ?? d.vip_score ?? d.ai_score ?? '';
+    const score = (d.display_score ?? d.score ?? d.vip_score ?? d.ai_score ?? '');
     const sum = d.sum ?? arr.reduce((a,b)=>a+Number(b),0);
     const odd = d.odd ?? arr.filter(n=>Number(n)%2).length;
     const even = d.even ?? (6-odd);
     const zones = d.zones || [arr.filter(n=>n<=15).length, arr.filter(n=>n>=16&&n<=30).length, arr.filter(n=>n>=31).length];
     const tags = d.tags || d.reasons || [];
-    const grade = `${gradeLabel(d)} · ${engineLabel(d)}`;
+    const grade = `${gradeLabel(d)} · ${engineLabel(d)} · 품질 ${qualityLabel(d)}`;
     const star = starLabel(d);
     return `<div class="combo-card v40-card ${i<3?'top-combo':''}">
       <div class="idx"><span>${i+1}조합</span><em>${grade} · ${score!=='' ? `${Number(score).toFixed(1)}점` : '점수 대기'}</em></div>
@@ -592,7 +594,7 @@ function renderRecommendationAnalysis(text){
 
 function renderEngine(engine, details=[]){
   const eb=$('engineBox'); if(!eb) return;
-  const scores = details.map(d=>Number(d.score ?? d.vip_score ?? d.ai_score ?? 0)).filter(Boolean);
+  const scores = details.map(d=>displayScoreOf(d)).filter(Boolean);
   const avg = engine?.avg_score ?? (scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(1) : '');
   const candidate = engine?.candidate_count ?? engine?.combo_count ?? engine?.total_candidates ?? '';
   const filter = engine?.filter_count ?? engine?.passed_count ?? details.length;

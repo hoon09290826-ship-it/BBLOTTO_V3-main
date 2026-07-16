@@ -2028,14 +2028,14 @@ except Exception as _v12_final_engine_import_error:
 
 # ===================== V12 ENGINE METADATA SUMMARY =====================
 def _engine_summary(details, st):
-    scores = [float(d.get('score') or d.get('ai_score') or d.get('vip_score') or 0) for d in (details or [])]
+    scores = [float(d.get('display_score') if d.get('display_score') is not None else (d.get('score') or d.get('ai_score') or d.get('vip_score') or 0)) for d in (details or [])]
     scores = [s for s in scores if s]
     version = st.get('engine_version') or 'BBLOTTO_AI_FULL_HISTORY_FAST_V12'
     grade = rc45_grade_label(st.get('member_grade') or '일반')
     return {
         'version': version,
         'engine_version': version,
-        'phase': 'FULL-HISTORY-FAST-V12',
+        'phase': 'RC6-D8.1-FULL-HISTORY-PORTFOLIO',
         'member_grade': grade,
         'engine_label': _rc729_engine_name(grade),
         'grade_strength': rc45_grade_strength_text(grade),

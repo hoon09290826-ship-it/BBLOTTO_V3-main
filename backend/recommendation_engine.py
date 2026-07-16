@@ -28,7 +28,7 @@ from .ai.score_engine import (
     triple_strength as _score_triple_strength,
 )
 
-ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_RC6_D8"
+ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_RC6_D8_1"
 _ensure_ai_scheduler_started()
 _CACHE_LOCK = threading.RLock()
 _MEMORY_CACHE: Dict[str, Any] = {}
@@ -696,16 +696,26 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
     # 0-100 display score based on the candidate-pool distribution.  This
     # prevents internal additive scores (for example 140+) being mistaken for
     # a probability or a 100-point scale.
-    raw_values = [float(item[1][0]) for item in ranked] or [1.0]
+    raw_values = sorted(float(item[1][0]) for item in ranked) or [1.0]
     raw_mean = sum(raw_values) / len(raw_values)
     raw_sd = math.sqrt(sum((v - raw_mean) ** 2 for v in raw_values) / max(1, len(raw_values))) or 1.0
+    selected_raw = sorted((float(item.get("score", 0) or 0) for item in selected_details), reverse=True)
     for item in selected_details:
         raw = float(item.get("score", 0) or 0)
-        z = max(-3.0, min(3.0, (raw - raw_mean) / raw_sd))
-        display_score = 50.0 + 15.0 * z
+        # 후보 풀 내 백분위와 표준점수를 함께 사용한다. 단순 상한 고정 방식보다
+        # 상위 조합의 차이를 보존하면서도 내부 가산점(140+)을 사용자 점수로 오해하지 않게 한다.
+        below = sum(1 for value in raw_values if value < raw)
+        equal = sum(1 for value in raw_values if math.isclose(value, raw, abs_tol=1e-9))
+        percentile = (below + max(0, equal - 1) * 0.5) / max(1, len(raw_values) - 1)
+        rank_index = next((idx for idx, value in enumerate(selected_raw) if math.isclose(value, raw, abs_tol=1e-9)), 0)
+        rank_ratio = 1.0 - (rank_index / max(1, len(selected_raw) - 1))
+        # 최종 선발 조합은 모두 후보 풀 상위권이므로 후보 백분위만 쓰면 95점대에 몰린다.
+        # 후보 풀 백분위와 최종 선발 내 상대 순위를 함께 반영해 실제 비교 가능한 점수 폭을 만든다.
+        display_score = 78.0 + 10.0 * percentile + 10.0 * rank_ratio
         item["raw_score"] = round(raw, 2)
-        item["display_score"] = round(max(0.0, min(100.0, display_score)), 1)
-        item["score_scale"] = "relative_0_100"
+        item["display_score"] = round(max(55.0, min(98.9, display_score)), 1)
+        item["score_scale"] = "candidate_percentile_0_100"
+        item["score_meaning"] = "후보 풀 내 상대평가 점수이며 당첨확률이 아닙니다."
 
     elapsed = round((time.perf_counter() - started) * 1000, 2)
     stats = {

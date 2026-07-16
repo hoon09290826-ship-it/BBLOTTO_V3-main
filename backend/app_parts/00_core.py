@@ -1490,7 +1490,7 @@ def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
         f"번호 풀은 HOT {', '.join(map(str,hot[:4]))}번과 보강 {', '.join(map(str,overdue[:4]))}번을 섞어 구성했습니다."
     ])
     if best:
-        line3=f"대표 조합은 합계 {best.get('sum')} / AC {best.get('ac')} / 홀짝 {best.get('odd')}:{best.get('even')} 기준이며 AI점수는 {best.get('score')}점입니다."
+        line3=f"대표 조합은 합계 {best.get('sum')} / AC {best.get('ac')} / 홀짝 {best.get('odd')}:{best.get('even')} 기준이며 AI SCORE는 {best.get('display_score', best.get('score'))}점입니다."
     else:
         line3=f"평균 AI점수는 {engine.get('avg_score',0)}점이며 과도한 중복과 구간 쏠림을 줄였습니다."
     line4=random.choice([
@@ -1507,7 +1507,7 @@ def build_sms(member_name, round_no, combos, analysis, details):
     best_line=''
     if best:
         b=best[0]
-        best_line=f"대표 조합 포인트: 합계 {b.get('sum')} / AC {b.get('ac')} / 홀짝 {b.get('odd')}:{b.get('even')} / AI점수 {b.get('score')}점"
+        best_line=f"대표 조합 포인트: 합계 {b.get('sum')} / AC {b.get('ac')} / 홀짝 {b.get('odd')}:{b.get('even')} / AI SCORE {b.get('display_score', b.get('score'))}점"
     return '\n'.join([
         f'안녕하세요 {name}님, BBLOTTO입니다.',
         f'{round_no}회차 추천번호와 이번 회차 분석을 안내드립니다.',
@@ -1522,11 +1522,14 @@ def build_sms(member_name, round_no, combos, analysis, details):
 
 # RC3-7: 추천결과 화면/저장 안정화를 위한 상세정보 보강
 def rc37_grade(score):
+    """화면용 조합 품질 등급. 회원 등급/예상 당첨 등수와 분리합니다."""
     try: s=float(score or 0)
     except Exception: s=0
-    if s >= 97: return '1등'
-    if s >= 94: return '2등'
-    return '일반'
+    if s >= 95: return 'S+'
+    if s >= 90: return 'S'
+    if s >= 85: return 'A+'
+    if s >= 80: return 'A'
+    return 'B'
 
 def rc37_star(score):
     try: s=float(score or 0)
@@ -1534,31 +1537,39 @@ def rc37_star(score):
     if s >= 95: return '★★★★★'
     if s >= 90: return '★★★★☆'
     if s >= 85: return '★★★★'
-    return '★★★☆'
+    if s >= 80: return '★★★☆'
+    return '★★★'
 
 def rc37_enrich_details(combos, details):
     enriched=[]
     details=list(details or [])
     for i, combo in enumerate(combos or []):
         d=dict(details[i]) if i < len(details) and isinstance(details[i], dict) else {}
-        score=d.get('score') or d.get('ai_score') or d.get('vip_score') or 0
-        try: score=round(float(score),1)
-        except Exception: score=0
+        raw_score=d.get('raw_score') if d.get('raw_score') is not None else (d.get('score') or d.get('ai_score') or d.get('vip_score') or 0)
+        display_score=d.get('display_score') if d.get('display_score') is not None else raw_score
+        try: raw_score=round(float(raw_score),2)
+        except Exception: raw_score=0
+        try: display_score=round(float(display_score),1)
+        except Exception: display_score=0
         nums=[int(n) for n in combo]
         odd=sum(n%2 for n in nums)
         zones=[sum(n<=15 for n in nums), sum(16<=n<=30 for n in nums), sum(n>=31 for n in nums)]
         d.update({
             'rank': i+1,
-            'score': score,
-            'star': d.get('star') or rc37_star(score),
-            'grade': d.get('grade') or rc37_grade(score),
+            # score는 기존 저장/API 호환을 위해 유지하되 화면은 display_score를 우선 사용합니다.
+            'score': raw_score,
+            'raw_score': raw_score,
+            'display_score': display_score,
+            'score_scale': d.get('score_scale') or 'candidate_percentile_0_100',
+            'star': rc37_star(display_score),
+            'quality_grade': rc37_grade(display_score),
             'sum': d.get('sum') or sum(nums),
             'odd': d.get('odd') if d.get('odd') is not None else odd,
             'even': d.get('even') if d.get('even') is not None else 6-odd,
             'zones': d.get('zones') or zones,
         })
         tags=list(d.get('tags') or d.get('reasons') or [])
-        tags.append(d['grade'])
+        tags.append('품질 '+d['quality_grade'])
         tags.append(d['star'])
         d['tags']=list(dict.fromkeys(str(t) for t in tags if t))[:5]
         enriched.append(d)
@@ -1566,8 +1577,8 @@ def rc37_enrich_details(combos, details):
 
 def rc37_top3(combos, details):
     rows=[]
-    for combo, d in sorted(zip(combos or [], details or []), key=lambda x: -float(x[1].get('score') or 0))[:3]:
-        rows.append({'numbers': combo, 'score': d.get('score',0), 'star': d.get('star',''), 'grade': d.get('grade','STANDARD')})
+    for combo, d in sorted(zip(combos or [], details or []), key=lambda x: -float(x[1].get('display_score', x[1].get('score',0)) or 0))[:3]:
+        rows.append({'numbers': combo, 'score': d.get('display_score', d.get('score',0)), 'raw_score': d.get('raw_score', d.get('score',0)), 'star': d.get('star',''), 'grade': d.get('quality_grade','B')})
     return rows
 
 
@@ -1608,7 +1619,7 @@ def rc38_portfolio_reorder(combos, details, max_overlap=3):
 def rc38_generation_report(combos, details, safe_round, safe_mode):
     scores=[]
     for d in details or []:
-        try: scores.append(float(d.get('score') or d.get('ai_score') or d.get('vip_score') or 0))
+        try: scores.append(float(d.get('display_score') if d.get('display_score') is not None else (d.get('score') or d.get('ai_score') or d.get('vip_score') or 0)))
         except Exception: pass
     overlap_count=0
     max_overlap=0
