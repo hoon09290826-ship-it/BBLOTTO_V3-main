@@ -194,6 +194,47 @@ def _job_dict(row: Any) -> Dict[str, Any]:
     return item
 
 
+
+def recover_orphaned_jobs(c: Any, *, stale_minutes: int = 30, created_by: int = 0) -> List[int]:
+    """Mark stale running jobs as failed after a server restart/crash.
+
+    Ready/paused/baseline-completed jobs are intentionally preserved because
+    they can be resumed or cancelled by an administrator. Only a stale
+    ``running`` row can falsely block the UI when no worker exists.
+    """
+    ensure_ai_lab_tables(c)
+    minutes = max(5, min(24 * 60, safe_int(stale_minutes, 30, minimum=5)))
+    rows = c.execute(
+        "SELECT * FROM ai_learning_jobs WHERE status='running' ORDER BY id"
+    ).fetchall()
+    recovered: List[int] = []
+    now = dt.datetime.now()
+    for row in rows:
+        item = _row(row)
+        stamp = str(item.get('updated_at') or item.get('started_at') or item.get('created_at') or '').strip()
+        try:
+            updated = dt.datetime.strptime(stamp, '%Y-%m-%d %H:%M:%S')
+        except (TypeError, ValueError):
+            updated = dt.datetime.min
+        if (now - updated).total_seconds() < minutes * 60:
+            continue
+        job_id = safe_int(item.get('id'), 0, minimum=1)
+        message = '서버 재시작 또는 연결 종료로 실행 상태가 남아 자동 복구되었습니다.'
+        c.execute(
+            "UPDATE ai_learning_jobs SET status='failed',error_message=?,completed_at=?,updated_at=? WHERE id=?",
+            (message, _now(), _now(), job_id),
+        )
+        c.execute(
+            "INSERT INTO ai_learning_notes(job_id,version_id,note_type,title,body,data_json,created_by,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (job_id, safe_int(item.get('base_version_id'), 0), 'orphan_recovered',
+             '고아 학습 작업 자동 복구', message, '{}', int(created_by or 0), _now()),
+        )
+        recovered.append(job_id)
+    if recovered:
+        c.commit()
+    return recovered
+
 def get_overview(c: Any) -> Dict[str, Any]:
     ensure_ai_lab_tables(c)
     stable = c.execute("SELECT * FROM ai_engine_versions WHERE status='stable' ORDER BY id DESC LIMIT 1").fetchone()

@@ -6,6 +6,7 @@ from .ai.ai_lab_core import (
     ensure_ai_lab_tables,
     get_job as ai_lab_get_job,
     get_overview as ai_lab_get_overview,
+    recover_orphaned_jobs as ai_lab_recover_orphans,
     list_jobs as ai_lab_list_jobs,
     list_notes as ai_lab_list_notes,
     list_profiles as ai_lab_list_profiles,
@@ -67,10 +68,21 @@ class AiLabRollbackReq(BaseModel):
 def ai_lab_overview(authorization: str | None = Header(default=None)):
     admin = require_admin(authorization)
     require_super_admin(admin)
-    with con() as c:
-        ai_lab_bootstrap(c, engine_code_version=ENGINE_VERSION, created_by=int(admin['id']))
-        data = ai_lab_get_overview(c)
-    return {'ok': True, **data}
+    recovered = []
+    try:
+        with con() as c:
+            ai_lab_bootstrap(c, engine_code_version=ENGINE_VERSION, created_by=int(admin['id']))
+            recovered = ai_lab_recover_orphans(c, created_by=int(admin['id']))
+            data = ai_lab_get_overview(c)
+    except Exception as exc:
+        logger.exception('AI LAB overview failed')
+        # Keep the management screen usable even when legacy AI LAB rows are malformed.
+        return {
+            'ok': True, 'degraded': True, 'warning': str(exc), 'stable': {},
+            'active_job': {}, 'counts': {'versions': 0, 'profiles': 0, 'jobs': 0, 'notes': 0},
+            'recovered_job_ids': recovered,
+        }
+    return {'ok': True, **data, 'recovered_job_ids': recovered}
 
 
 @router.get('/api/ai-lab/profiles')
@@ -121,7 +133,8 @@ def ai_lab_jobs(limit: int = 50, authorization: str | None = Header(default=None
     admin = require_admin(authorization)
     require_super_admin(admin)
     with con() as c:
-        return {'ok': True, 'items': ai_lab_list_jobs(c, limit=limit)}
+        recovered = ai_lab_recover_orphans(c, created_by=int(admin['id']))
+        return {'ok': True, 'items': ai_lab_list_jobs(c, limit=limit), 'recovered_job_ids': recovered}
 
 
 @router.get('/api/ai-lab/jobs/{job_id}')
