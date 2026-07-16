@@ -28,7 +28,7 @@ from .ai.score_engine import (
     triple_strength as _score_triple_strength,
 )
 
-ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_RC4_5"
+ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_RC6_D8"
 _ensure_ai_scheduler_started()
 _CACHE_LOCK = threading.RLock()
 _MEMORY_CACHE: Dict[str, Any] = {}
@@ -191,7 +191,17 @@ def _build_cache(draws_override: Optional[Sequence[Dict[str, Any]]] = None) -> D
         )
 
     pattern_sigs = [_sig(d["numbers"]) for d in draws]
-    recent_patterns = pattern_sigs[-100:] or pattern_sigs
+    recent_patterns = pattern_sigs[-200:] or pattern_sigs
+    # Empirical structure distributions are used as a smoothed prior.  This
+    # avoids rewarding only individual-number popularity and gives the final
+    # ranker a historical reference for whole-combination shape.
+    structure_distributions = {
+        "odd": dict(Counter(int(x["odd"]) for x in recent_patterns)),
+        "ac": dict(Counter(int(x["ac"]) for x in recent_patterns)),
+        "consecutive": dict(Counter(int(x["consecutive"]) for x in recent_patterns)),
+        "end_types": dict(Counter(int(x["end_types"]) for x in recent_patterns)),
+        "zones": dict(Counter("-".join(map(str, x["zones"])) for x in recent_patterns)),
+    }
     def avg(key: str, default: float) -> float:
         vals = [float(x[key]) for x in recent_patterns]
         return sum(vals) / len(vals) if vals else default
@@ -232,6 +242,8 @@ def _build_cache(draws_override: Optional[Sequence[Dict[str, Any]]] = None) -> D
             "sum_mean": round(sum_mean, 2), "sum_sd": round(sum_sd, 2),
             "odd_mean": round(avg("odd", 3), 2), "ac_mean": round(avg("ac", 7), 2),
             "consecutive_mean": round(avg("consecutive", 0.8), 2),
+            "sample_count": len(recent_patterns),
+            "distributions": structure_distributions,
         },
         "latest_numbers": latest_numbers,
         "built_at": dt.datetime.now().isoformat(timespec="seconds"),
@@ -477,7 +489,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
     seed_text = f"{seed_basis}|{member_id}|{member_grade}|{mode}|{fixed_nums}|{sorted(excluded_nums)}|{cache.get('latest_round')}"
     rng = random.Random(int(hashlib.sha256(seed_text.encode()).hexdigest()[:16], 16))
 
-    candidate_target = min(1800, max(180, target * 45))
+    candidate_target = min(2000, max(240, target * 60))
     pool: Dict[Tuple[int, ...], Tuple[float, Dict[str, Any]]] = {}
     attempts = 0
     while len(pool) < candidate_target and attempts < candidate_target * 5:
@@ -505,7 +517,11 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         best = None
         for combo, (base_score, detail) in list(available.items()):
             overlap = max((len(set(combo) & set(prev)) for prev in selected), default=0)
-            if overlap >= 5:
+            # For a normal 10-combination portfolio, four or more shared
+            # numbers makes tickets too similar. Larger exports retain a
+            # slightly looser limit so generation cannot deadlock.
+            overlap_limit = 4 if target <= 20 else 5
+            if overlap >= overlap_limit:
                 continue
             strategy_bonus, strategy_components = _strategy_fit(combo, detail, cache, strategy, member_profile)
             portfolio_adjustment, portfolio_components = _portfolio_adjustment(combo, selected, usage, target)
@@ -621,7 +637,8 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             continue
 
         overlap = max((len(set(combo) & set(prev)) for prev in selected), default=0)
-        if overlap >= 5:
+        overlap_limit = 4 if target <= 20 else 5
+        if overlap >= overlap_limit:
             continue
 
         base_score, detail = _combo_score(combo, cache, weights)
@@ -674,6 +691,21 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             f"요청한 {target}개 조합 중 {len(selected)}개만 생성되었습니다. "
             "고정수·제외수 조건을 완화한 뒤 다시 시도해주세요."
         )
+
+    # Keep the raw score for deterministic ranking, but expose a bounded
+    # 0-100 display score based on the candidate-pool distribution.  This
+    # prevents internal additive scores (for example 140+) being mistaken for
+    # a probability or a 100-point scale.
+    raw_values = [float(item[1][0]) for item in ranked] or [1.0]
+    raw_mean = sum(raw_values) / len(raw_values)
+    raw_sd = math.sqrt(sum((v - raw_mean) ** 2 for v in raw_values) / max(1, len(raw_values))) or 1.0
+    for item in selected_details:
+        raw = float(item.get("score", 0) or 0)
+        z = max(-3.0, min(3.0, (raw - raw_mean) / raw_sd))
+        display_score = 50.0 + 15.0 * z
+        item["raw_score"] = round(raw, 2)
+        item["display_score"] = round(max(0.0, min(100.0, display_score)), 1)
+        item["score_scale"] = "relative_0_100"
 
     elapsed = round((time.perf_counter() - started) * 1000, 2)
     stats = {
