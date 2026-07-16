@@ -177,7 +177,35 @@ window.deleteSmsLog=safe(async function(smsId, memberId){
   await loadMembers();
   await loadDashboard();
 });
-window.deleteMember=safe(async function(id){ if(!confirm('삭제할까요?')) return; await api('/api/members/'+id,{method:'DELETE'}); await loadMembers(); await loadDashboard(); });
+window.quickMemberStatus=safe(async function(id, status){
+  const memberId=Number(id||0);
+  const nextStatus=String(status||'').trim();
+  if(!memberId) return alert('회원 정보를 찾지 못했습니다.');
+  if(!['활성','상담중','휴면','정지','종료','탈퇴'].includes(nextStatus)) return alert('허용되지 않은 회원 상태입니다.');
+  const member=(Array.isArray(membersCache)?membersCache:[]).find(x=>Number(x.id)===memberId);
+  const current=String(member?.status||'활성');
+  if(current===nextStatus){ toast(`이미 ${nextStatus} 상태입니다.`); return; }
+  const label=member?.name ? `${member.name} 회원을` : '이 회원을';
+  if(!confirm(`${label} ${nextStatus} 상태로 변경할까요?`)) return;
+  await api(`/api/members/${memberId}/status`,{method:'POST',body:{status:nextStatus}});
+  toast(`회원 상태를 ${nextStatus}(으)로 변경했습니다.`);
+  await loadMembers();
+  await loadDashboard();
+  if($('memberDetail') && String($('memberDetail').dataset?.memberId||'')===String(memberId)) await detailMember(memberId);
+});
+window.deleteMember=safe(async function(id){
+  const memberId=Number(id||0);
+  if(!memberId) return alert('회원 정보를 찾지 못했습니다.');
+  const member=(Array.isArray(membersCache)?membersCache:[]).find(x=>Number(x.id)===memberId);
+  const name=member?.name ? `${member.name} 회원을` : '이 회원을';
+  if(!confirm(`${name} 완전히 삭제할까요?\n추천번호와 문자 이력 등 연결 데이터에 영향을 줄 수 있습니다.`)) return;
+  await api('/api/members/'+memberId,{method:'DELETE'});
+  toast('회원을 삭제했습니다.');
+  if(String($('mId')?.value||'')===String(memberId)) $('clearMember')?.click();
+  await loadMembers();
+  await loadDashboard();
+  const detail=$('memberDetail'); if(detail) detail.innerHTML='<p class="hint">회원 목록에서 상세를 눌러주세요.</p>';
+});
 window.downloadApi=function(path){ const t=token(); location.href=path+(path.includes('?')?'&':'?')+'token='+encodeURIComponent(t); };
 window.revokeSession=async function(tail){ if(!confirm('이 세션을 강제 종료할까요?')) return; await api('/api/sessions/'+tail,{method:'DELETE'}); toast('세션을 종료했습니다.'); await loadAdmin(); };
 window.cleanupSessions=function(){ alert('세션 정리는 관리자 설정에서 처리됩니다.'); };
