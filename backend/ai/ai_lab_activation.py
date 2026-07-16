@@ -93,7 +93,15 @@ def approve_best_candidate(c: Any, job_id: int, version_id: int, *, reason: str,
             "VALUES(?,?,?,?,?,?,?,?)",
             (int(job_id), stable_id, int(version_id), "approve", reason_text, _json(metrics), int(created_by), now),
         )
-        activation_id = int(cur.lastrowid or 0)
+        activation_id = int(getattr(cur, "lastrowid", None) or 0)
+        if activation_id <= 0:
+            saved = c.execute(
+                "SELECT id FROM ai_engine_activations WHERE from_version_id=? AND to_version_id=? AND action=? AND created_at=? ORDER BY id DESC LIMIT 1",
+                (stable_id, int(version_id), "approve", now),
+            ).fetchone()
+            activation_id = int(saved["id"] if saved else 0)
+        if activation_id <= 0:
+            raise RuntimeError("Stable 승인 이력 ID를 확인하지 못했습니다.")
         result = dict(job.get("result") or {})
         result.update({
             "approved_version_id": int(version_id),
@@ -148,7 +156,15 @@ def rollback_stable(c: Any, target_version_id: int, *, reason: str, created_by: 
             "INSERT INTO ai_engine_activations(job_id,from_version_id,to_version_id,action,reason,metrics_json,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)",
             (0, current_id, target_id, "rollback", reason_text, _json({"activation_version": ACTIVATION_VERSION}), int(created_by), now),
         )
-        activation_id = int(cur.lastrowid or 0)
+        activation_id = int(getattr(cur, "lastrowid", None) or 0)
+        if activation_id <= 0:
+            saved = c.execute(
+                "SELECT id FROM ai_engine_activations WHERE from_version_id=? AND to_version_id=? AND action=? AND created_at=? ORDER BY id DESC LIMIT 1",
+                (current_id, target_id, "rollback", now),
+            ).fetchone()
+            activation_id = int(saved["id"] if saved else 0)
+        if activation_id <= 0:
+            raise RuntimeError("Stable 롤백 이력 ID를 확인하지 못했습니다.")
         c.execute(
             "INSERT INTO ai_learning_notes(job_id,version_id,note_type,title,body,data_json,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)",
             (0, target_id, "stable_rollback", "Stable 엔진 롤백", f"Stable 엔진을 #{current_id}에서 #{target_id}로 롤백했습니다.", _json({"reason": reason_text, "activation_id": activation_id}), int(created_by), now),

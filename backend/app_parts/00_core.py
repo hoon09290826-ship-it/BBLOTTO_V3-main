@@ -280,14 +280,6 @@ class PgCursorCompat:
         s = re.sub(r'INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT', 'SERIAL PRIMARY KEY', s, flags=re.I)
         s = s.replace('INSERT OR IGNORE INTO', 'INSERT INTO')
         s = s.replace('INSERT OR REPLACE INTO', 'INSERT INTO')
-        # SQLite accepts double-quoted string defaults, but PostgreSQL treats
-        # double quotes as identifier quotes. Convert every DEFAULT "text"
-        # literal generically so new columns never fail with
-        # `cannot use column reference in DEFAULT expression`.
-        def _pg_default_literal(match):
-            value = match.group(1).replace("'", "''")
-            return f"DEFAULT '{value}'"
-        s = re.sub(r'DEFAULT\s+"([^"]*)"', _pg_default_literal, s, flags=re.I)
         s = s.replace('DEFAULT ""', "DEFAULT ''")
         s = s.replace('DEFAULT "관리자"', "DEFAULT '관리자'")
         s = s.replace('DEFAULT "전체권한"', "DEFAULT '전체권한'")
@@ -358,8 +350,18 @@ class PgCursorCompat:
         if m:
             return self._table_info_rows(m.group(1).strip().strip('"'))
         s = self._convert_sql(sql)
-        # lastrowid가 필요한 주요 INSERT는 RETURNING id 추가
-        if re.match(r'\s*INSERT\s+INTO\s+(members|recommendations|sms_logs|backtest_runs|ai_lab_profiles|ai_lab_versions|ai_lab_jobs|ai_lab_activations)\s*\(', s, re.I) and 'RETURNING' not in s and 'ON CONFLICT' not in s:
+        # PostgreSQL에서는 sqlite의 cursor.lastrowid가 제공되지 않는다.
+        # ID를 후속 처리에서 사용하는 모든 INSERT에 RETURNING id를 붙여
+        # SQLite/PostgreSQL이 동일하게 lastrowid를 제공하도록 맞춘다.
+        id_tables = (
+            'members', 'recommendations', 'sms_logs', 'backtest_runs',
+            'ai_weight_profiles', 'ai_engine_versions', 'ai_learning_jobs',
+            'ai_learning_notes', 'ai_engine_activations',
+            # 구버전 테이블명도 호환 유지
+            'ai_lab_profiles', 'ai_lab_versions', 'ai_lab_jobs', 'ai_lab_activations',
+        )
+        id_table_pattern = '|'.join(re.escape(name) for name in id_tables)
+        if re.match(rf'\s*INSERT\s+INTO\s+({id_table_pattern})\s*\(', s, re.I) and 'RETURNING' not in s.upper() and 'ON CONFLICT' not in s.upper():
             s += ' RETURNING id'
         try:
             self.cur.execute(s, params)

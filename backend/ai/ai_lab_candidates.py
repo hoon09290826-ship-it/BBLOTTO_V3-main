@@ -23,6 +23,34 @@ _MAX_ABS_DELTA = 0.08
 _TERMINAL_OK = {"baseline_completed", "completed", "candidates_ready"}
 
 
+
+def _inserted_id(c, cur, table: str, *, lookup_sql: str = "", lookup_params=()) -> int:
+    """Return a committed insert id on both SQLite and PostgreSQL.
+
+    PostgreSQL compatibility normally supplies ``lastrowid`` through
+    ``RETURNING id``.  The lookup fallback protects existing deployments or
+    custom DB wrappers from ever converting ``None`` to ``int``.
+    """
+    value = getattr(cur, "lastrowid", None)
+    try:
+        if value not in (None, ""):
+            result = int(value)
+            if result > 0:
+                return result
+    except (TypeError, ValueError):
+        pass
+    if lookup_sql:
+        row = c.execute(lookup_sql, tuple(lookup_params or ())).fetchone()
+        if row:
+            candidate = row.get("id") if hasattr(row, "get") else row[0]
+            try:
+                result = int(candidate)
+                if result > 0:
+                    return result
+            except (TypeError, ValueError):
+                pass
+    raise RuntimeError(f"{table} INSERT 후 생성 ID를 확인하지 못했습니다.")
+
 def _stable_context(c: Any, job: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     version = c.execute(
         "SELECT * FROM ai_engine_versions WHERE id=?",
@@ -199,7 +227,13 @@ def generate_candidates(c: Any, job_id: int, *, created_by: int = 0, force: bool
                 _now(),
             ),
         )
-        profile_id = int(cur.lastrowid)
+        profile_id = _inserted_id(
+            c,
+            cur,
+            "ai_weight_profiles",
+            lookup_sql="SELECT id FROM ai_weight_profiles WHERE fingerprint=? ORDER BY id DESC LIMIT 1",
+            lookup_params=(fingerprint,),
+        )
         metrics = {
             "candidate_generator_version": CANDIDATE_GENERATOR_VERSION,
             "schema_version": AI_LAB_SCHEMA_VERSION,
@@ -225,7 +259,13 @@ def generate_candidates(c: Any, job_id: int, *, created_by: int = 0, force: bool
                 _now(),
             ),
         )
-        version_id = int(cur.lastrowid)
+        version_id = _inserted_id(
+            c,
+            cur,
+            "ai_engine_versions",
+            lookup_sql="SELECT id FROM ai_engine_versions WHERE profile_id=? AND status='candidate' ORDER BY id DESC LIMIT 1",
+            lookup_params=(profile_id,),
+        )
         created_profiles.append(profile_id)
         created_versions.append(version_id)
         fingerprints.add(fingerprint)
