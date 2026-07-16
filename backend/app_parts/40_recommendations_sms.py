@@ -225,7 +225,17 @@ def save_sms(req:SmsReq, request:Request, authorization: str|None = Header(defau
         c.commit(); sid=cur.lastrowid
     action = 'SEND_SMS' if req.send_now else 'SAVE_SMS'
     log_action(admin,action,f'{req.round_no}회차 문자 {result.get("status")}',request)
-    return {'id':sid, **result}
+    return {
+        'id': sid,
+        'sms_log_id': sid,
+        'recommendation_id': int(req.recommendation_id or 0),
+        'engine_version': values.get('engine_version', ''),
+        'ai_lab_version_id': int(values.get('ai_lab_version_id') or 0),
+        'ai_lab_version_name': values.get('ai_lab_version_name', ''),
+        'ai_lab_profile_name': values.get('ai_lab_profile_name', ''),
+        'ai_lab_backtest_run_id': int(values.get('ai_lab_backtest_run_id') or 0),
+        **result,
+    }
 
 @router.post('/api/sms_log')
 def save_sms_log_alias(req:SmsReq, request:Request, authorization: str|None = Header(default=None)):
