@@ -7,7 +7,20 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let activeJob=null,busy=false,stopRequested=false;
 const terminal=new Set(['completed','cancelled','failed','approved','candidates_ranked']);
 const statusLabel={ready:'준비',running:'실행 중',paused:'일시정지',baseline_completed:'기준 측정 완료',candidates_ready:'후보 생성 완료',candidates_ranked:'후보 비교 완료',approved:'승인 완료',completed:'완료',cancelled:'중단',failed:'실패'};
-const isActive=j=>!!j&&!terminal.has(String(j.status||''));
+const validId=v=>Number.isInteger(Number(v))&&Number(v)>0;
+function normalizeJob(value){
+ const source=value&&typeof value==='object'?(value.item||value.job||value.current_job||value.active_job||value):null;
+ if(!source||typeof source!=='object')return null;
+ const id=Number(source.id??source.job_id??source.jobId);
+ if(!validId(id))return null;
+ return {...source,id,job_id:id};
+}
+const isActive=j=>{const n=normalizeJob(j);return !!n&&!terminal.has(String(n.status||''));};
+function currentJobId(action){
+ const j=normalizeJob(activeJob);
+ if(!j){syncButtons();alert(`${action||'작업'}할 유효한 학습 작업이 없습니다. 새로고침 후 다시 시도하세요.`);return null;}
+ activeJob=j;return j.id;
+}
 function fmt(v,n=3){return Number(v||0).toFixed(n);}
 function badge(v){if(el('aiLabBadge'))el('aiLabBadge').textContent=v;}
 function setDisabled(id,v){const node=el(id);if(node)node.disabled=!!v;}
@@ -24,7 +37,7 @@ function syncButtons(){
 }
 function setBusy(v){busy=!!v;syncButtons();}
 function progress(job){
- activeJob=job||null;
+ activeJob=normalizeJob(job);
  if(!activeJob){badge('대기');el('aiLabProgressText').textContent='실행 중인 연구가 없습니다.';el('aiLabProgressBar').style.width='0%';syncButtons();return;}
  const p=Math.max(0,Math.min(100,Number(activeJob.progress_percent||0)));
  el('aiLabProgressBar').style.width=p+'%';
@@ -46,20 +59,20 @@ async function loadAll(){
   const [o,s,v,a,n,j]=await Promise.all([
    safeGet('/api/ai-lab/overview',{counts:{},stable:{},active_job:null}),safeGet('/api/ai-lab/stable',{item:{}}),safeGet('/api/ai-lab/versions?limit=50',{items:[]}),safeGet('/api/ai-lab/activations?limit=50',{items:[]}),safeGet('/api/ai-lab/notes?limit=50',{items:[]}),safeGet('/api/ai-lab/jobs?limit=20',{items:[]})]);
   renderStable(s.item||o.stable);renderKpis(o);
-  const jobs=j.items||[];activeJob=jobs.find(isActive)||o.active_job||jobs[0]||null;progress(activeJob);
+  const jobs=(Array.isArray(j.items)?j.items:[]).map(normalizeJob).filter(Boolean);activeJob=jobs.find(isActive)||normalizeJob(o.active_job)||jobs[0]||null;progress(activeJob);
   renderVersions(v.items||[],(s.item||{}).version_id||(o.stable||{}).id);renderActivations(a.items||[]);renderNotes(n.items||[]);
-  if(activeJob){const r=await safeGet(`/api/ai-lab/jobs/${activeJob.id}/rankings`,{items:[]});renderRankings(r.items||[]);}else renderRankings([]);
+  if(normalizeJob(activeJob)){const r=await safeGet(`/api/ai-lab/jobs/${activeJob.id}/rankings`,{items:[]});renderRankings(r.items||[]);}else renderRankings([]);
   const recovered=[...(o.recovered_job_ids||[]),...(j.recovered_job_ids||[])];if(recovered.length)toast(`중단된 실행 작업 #${[...new Set(recovered)].join(', #')}을 자동 복구했습니다.`);
  }finally{setBusy(false);}
 }
-async function createJob(){if(isActive(activeJob))return alert(`완료되지 않은 작업 #${activeJob.id}을 먼저 완료하거나 중단하세요.`);const d=await api('/api/ai-lab/jobs',{method:'POST',body:{range_type:el('aiLabRange').value,candidate_limit:Number(el('aiLabCandidateLimit').value||6),random_seed:Date.now()%2147483647}});progress(d.item);toast('AI LAB 연구 작업을 생성했습니다.');}
-async function runBaseline(){if(!activeJob)return alert('먼저 새 연구를 시작하세요.');stopRequested=false;setBusy(true);try{while(activeJob&&['ready','running'].includes(activeJob.status)&&!stopRequested){const d=await api(`/api/ai-lab/jobs/${activeJob.id}/step?step_size=5`,{method:'POST'});progress(d.job||activeJob);if(d.done||d.paused)break;await sleep(80);}await loadAll();}finally{setBusy(false);}}
-async function pauseJob(){if(activeJob?.status!=='running')return alert('실행 중인 작업만 일시정지할 수 있습니다.');stopRequested=true;const d=await api(`/api/ai-lab/jobs/${activeJob.id}/pause`,{method:'POST'});progress(d.item);toast('일시정지했습니다.');}
-async function resumeJob(){if(activeJob?.status!=='paused')return alert('일시정지된 작업이 없습니다.');const d=await api(`/api/ai-lab/jobs/${activeJob.id}/resume`,{method:'POST'});progress(d.item);await runBaseline();}
-async function cancelJob(){if(!isActive(activeJob))return alert('중단할 진행 작업이 없습니다.');if(!confirm(`작업 #${activeJob.id}을 중단할까요? 운영 Stable 엔진은 변경되지 않습니다.`))return;stopRequested=true;const d=await api(`/api/ai-lab/jobs/${activeJob.id}/cancel`,{method:'POST'});progress(d.item);toast('작업을 중단했습니다.');await loadAll();}
-async function generateCandidates(){if(activeJob?.status!=='baseline_completed')return alert('기준 성능 측정을 먼저 완료하세요.');const d=await api(`/api/ai-lab/jobs/${activeJob.id}/generate-candidates`,{method:'POST'});toast(`Candidate ${d.created_count||d.count||0}개를 생성했습니다.`);await loadAll();}
-async function compareCandidates(){if(activeJob?.status!=='candidates_ready')return alert('후보 생성을 먼저 완료하세요.');setBusy(true);try{let done=false;while(!done){const d=await api(`/api/ai-lab/jobs/${activeJob.id}/compare-step?step_size=5`,{method:'POST'});progress(d.job||activeJob);done=!!d.done;await sleep(80);}await loadAll();}finally{setBusy(false);}}
-async function approve(versionId){if(!activeJob)return;const reason=prompt('Stable 승인 사유를 입력하세요.','백테스트 1위 후보 관리자 승인');if(reason===null)return;await api('/api/ai-lab/approve',{method:'POST',body:{job_id:Number(activeJob.id),version_id:Number(versionId),reason}});toast('새 Stable 엔진을 승인했습니다.');await loadAll();}
+async function createJob(){const existing=normalizeJob(activeJob);if(isActive(existing))return alert(`완료되지 않은 작업 #${existing.id}을 먼저 완료하거나 중단하세요.`);const d=await api('/api/ai-lab/jobs',{method:'POST',body:{range_type:el('aiLabRange').value,candidate_limit:Number(el('aiLabCandidateLimit').value||6),random_seed:Date.now()%2147483647}});const created=normalizeJob(d);if(!created)throw new Error('서버가 유효한 작업 번호를 반환하지 않았습니다.');progress(created);toast('AI LAB 연구 작업을 생성했습니다.');}
+async function runBaseline(){const jobId=currentJobId('기준 성능 측정');if(!jobId)return;stopRequested=false;setBusy(true);try{while(normalizeJob(activeJob)&&['ready','running'].includes(activeJob.status)&&!stopRequested){const d=await api(`/api/ai-lab/jobs/${jobId}/step?step_size=5`,{method:'POST'});progress(normalizeJob(d)||activeJob);if(d.done||d.paused)break;await sleep(80);}await loadAll();}finally{setBusy(false);}}
+async function pauseJob(){if(normalizeJob(activeJob)?.status!=='running')return alert('실행 중인 작업만 일시정지할 수 있습니다.');const jobId=currentJobId('일시정지');if(!jobId)return;stopRequested=true;const d=await api(`/api/ai-lab/jobs/${jobId}/pause`,{method:'POST'});progress(normalizeJob(d));toast('일시정지했습니다.');}
+async function resumeJob(){if(normalizeJob(activeJob)?.status!=='paused')return alert('일시정지된 작업이 없습니다.');const jobId=currentJobId('이어 실행');if(!jobId)return;const d=await api(`/api/ai-lab/jobs/${jobId}/resume`,{method:'POST'});progress(normalizeJob(d));await runBaseline();}
+async function cancelJob(){const job=normalizeJob(activeJob);if(!isActive(job))return alert('중단할 진행 작업이 없습니다.');const jobId=currentJobId('중단');if(!jobId)return;if(!confirm(`작업 #${jobId}을 중단할까요? 운영 Stable 엔진은 변경되지 않습니다.`))return;stopRequested=true;const d=await api(`/api/ai-lab/jobs/${jobId}/cancel`,{method:'POST'});progress(normalizeJob(d));toast('작업을 중단했습니다.');await loadAll();}
+async function generateCandidates(){if(normalizeJob(activeJob)?.status!=='baseline_completed')return alert('기준 성능 측정을 먼저 완료하세요.');const jobId=currentJobId('후보 생성');if(!jobId)return;const d=await api(`/api/ai-lab/jobs/${jobId}/generate-candidates`,{method:'POST'});toast(`Candidate ${d.created_count||d.count||0}개를 생성했습니다.`);await loadAll();}
+async function compareCandidates(){if(normalizeJob(activeJob)?.status!=='candidates_ready')return alert('후보 생성을 먼저 완료하세요.');const jobId=currentJobId('후보 비교');if(!jobId)return;setBusy(true);try{let done=false;while(!done){const d=await api(`/api/ai-lab/jobs/${jobId}/compare-step?step_size=5`,{method:'POST'});progress(d.job||activeJob);done=!!d.done;await sleep(80);}await loadAll();}finally{setBusy(false);}}
+async function approve(versionId){const jobId=currentJobId('Stable 승인');if(!jobId)return;const reason=prompt('Stable 승인 사유를 입력하세요.','백테스트 1위 후보 관리자 승인');if(reason===null)return;await api('/api/ai-lab/approve',{method:'POST',body:{job_id:jobId,version_id:Number(versionId),reason}});toast('새 Stable 엔진을 승인했습니다.');await loadAll();}
 async function rollback(versionId){const reason=prompt('롤백 사유를 입력하세요.','이전 Stable 복원');if(reason===null)return;await api('/api/ai-lab/rollback',{method:'POST',body:{target_version_id:Number(versionId),reason}});toast('Stable 엔진을 롤백했습니다.');await loadAll();}
 function bind(){
  [['aiLabCreateJob',createJob],['aiLabRunBaseline',runBaseline],['aiLabPauseJob',pauseJob],['aiLabResumeJob',resumeJob],['aiLabCancelJob',cancelJob],['aiLabGenerateCandidates',generateCandidates],['aiLabCompareCandidates',compareCandidates],['aiLabRefresh',loadAll]].forEach(([id,fn])=>el(id)?.addEventListener('click',()=>fn().catch(e=>alert(e.message||e))));

@@ -191,6 +191,9 @@ def _job_dict(row: Any) -> Dict[str, Any]:
         item["target_rounds"] = safe_int(item.get("target_rounds"), 0, minimum=0)
         item["processed_rounds"] = processed
         item["progress_percent"] = round(min(processed, target) * 100 / target, 2)
+        # Frontend/API compatibility: always expose both id and job_id.
+        item["id"] = safe_int(item.get("id") or item.get("job_id"), 0, minimum=1)
+        item["job_id"] = item["id"]
     return item
 
 
