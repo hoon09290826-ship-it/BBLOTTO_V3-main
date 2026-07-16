@@ -28,7 +28,7 @@ from .ai.score_engine import (
     triple_strength as _score_triple_strength,
 )
 
-ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_RC6_D8_1"
+ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_RC7_E5_1_VERIFIED"
 _ensure_ai_scheduler_started()
 _CACHE_LOCK = threading.RLock()
 _MEMORY_CACHE: Dict[str, Any] = {}
@@ -163,10 +163,13 @@ def _build_cache(draws_override: Optional[Sequence[Dict[str, Any]]] = None) -> D
 
     pair_all: Counter = Counter()
     pair_recent: Counter = Counter()
+    triple_all: Counter = Counter()
     triple_recent: Counter = Counter()
     for i, d in enumerate(draws):
         for p in combinations(d["numbers"], 2):
             pair_all[p] += 1
+        for t in combinations(d["numbers"], 3):
+            triple_all[t] += 1
         if i >= max(0, len(draws) - 100):
             for p in combinations(d["numbers"], 2):
                 pair_recent[p] += 1
@@ -214,6 +217,9 @@ def _build_cache(draws_override: Optional[Sequence[Dict[str, Any]]] = None) -> D
     cold = sorted(range(1, 46), key=lambda n: (freqs[30][n], freqs[100][n], n))
     latest_numbers = [d["numbers"] for d in draws[-12:]]
 
+    existing_rounds = {int(d["round"]) for d in draws}
+    missing_rounds = [r for r in range(1, latest_round + 1) if r not in existing_rounds]
+
     return {
         "engine_version": ENGINE_VERSION,
         "cache_storage": "memory+db-source",
@@ -221,8 +227,9 @@ def _build_cache(draws_override: Optional[Sequence[Dict[str, Any]]] = None) -> D
         "draw_count": len(draws), "actual_count": len(draws), "expected_count": latest_round,
         "round_range": [draws[0]["round"], latest_round] if draws else [0, 0],
         "latest_round": latest_round, "target_round": latest_round + 1 if latest_round else 1,
-        "is_full_history": bool(draws and draws[0]["round"] == 1 and len(draws) == latest_round),
-        "missing_rounds_count": max(0, latest_round - len(draws)), "missing_rounds_sample": [],
+        "is_full_history": bool(draws and draws[0]["round"] == 1 and not missing_rounds),
+        "missing_rounds_count": len(missing_rounds), "missing_rounds_sample": missing_rounds[:20],
+        "analysis_windows": [10, 30, 50, 100, 300, "all"],
         "frequency10": {str(n): freqs[10][n] for n in range(1, 46)},
         "frequency30": {str(n): freqs[30][n] for n in range(1, 46)},
         "frequency50": {str(n): freqs[50][n] for n in range(1, 46)},
@@ -237,7 +244,9 @@ def _build_cache(draws_override: Optional[Sequence[Dict[str, Any]]] = None) -> D
         "pair_recent_top": [[list(p), c] for p, c in pair_recent.most_common(100)],
         "triple_recent_top": [[list(t), c] for t, c in triple_recent.most_common(50)],
         "pair_counts": {f"{a}-{b}": c for (a, b), c in pair_recent.items()},
+        "pair_all_counts": {f"{a}-{b}": c for (a, b), c in pair_all.items()},
         "triple_counts": {"-".join(map(str, t)): c for t, c in triple_recent.items()},
+        "triple_all_counts": {"-".join(map(str, t)): c for t, c in triple_all.items()},
         "pattern": {
             "sum_mean": round(sum_mean, 2), "sum_sd": round(sum_sd, 2),
             "odd_mean": round(avg("odd", 3), 2), "ac_mean": round(avg("ac", 7), 2),
@@ -414,7 +423,18 @@ def _strategy_fit(combo: Sequence[int], detail: Dict[str, Any], cache: Dict[str,
     momentum = sum(float(momentum_map.get(str(n), 0) or 0) for n in selected) / 6.0
 
     components: Dict[str, float] = {}
-    if strategy == "최근 흐름형":
+    if strategy == "장기 누적형":
+        stable = sum(float((cache.get("frequency_all", {}) or {}).get(str(n), 0) or 0) for n in selected) / 6.0
+        components["full_history_bonus"] = min(8.0, stable / max(1.0, float(cache.get("draw_count", 1))) * 55.0)
+        components["pair_bonus"] = min(5.0, pair * 1.0)
+    elif strategy == "트리플 보강형":
+        triple = float(detail.get("triple_strength", 0) or 0)
+        components["triple_bonus"] = min(8.0, triple * 1.2)
+        components["pair_bonus"] = min(4.0, pair * 0.8)
+    elif strategy == "구간 분산형":
+        components["zone_balance_bonus"] = max(0.0, zone_balance * 6.5)
+        components["end_spread_bonus"] = min(3.5, max(0, end_types - 3) * 1.0)
+    elif strategy == "최근 흐름형":
         components["hot_bonus"] = min(8.0, hot_count * 2.0)
         components["momentum_bonus"] = max(-2.0, min(5.0, momentum * 18.0))
     elif strategy == "반등 혼합형":
@@ -489,7 +509,32 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
     seed_text = f"{seed_basis}|{member_id}|{member_grade}|{mode}|{fixed_nums}|{sorted(excluded_nums)}|{cache.get('latest_round')}"
     rng = random.Random(int(hashlib.sha256(seed_text.encode()).hexdigest()[:16], 16))
 
-    candidate_target = min(2000, max(240, target * 60))
+    grade_key = str(member_grade or "일반").strip()
+    grade_profiles = {
+        "1등": {
+            "name": "AI MASTER 장기연계형",
+            "candidate_multiplier": 95,
+            "candidate_floor": 850,
+            "strategy_cycle": ["장기 누적형", "동반출현형", "트리플 보강형", "최근 흐름형", "균형형"],
+            "overlap_limit": 3,
+        },
+        "2등": {
+            "name": "AI PREMIUM 균형추세형",
+            "candidate_multiplier": 78,
+            "candidate_floor": 700,
+            "strategy_cycle": ["균형형", "최근 흐름형", "동반출현형", "반등 혼합형"],
+            "overlap_limit": 3,
+        },
+        "일반": {
+            "name": "AI BASIC 안정분산형",
+            "candidate_multiplier": 65,
+            "candidate_floor": 600,
+            "strategy_cycle": ["균형형", "반등 혼합형", "구간 분산형", "최근 흐름형"],
+            "overlap_limit": 3,
+        },
+    }
+    grade_profile = grade_profiles.get(grade_key, grade_profiles["일반"])
+    candidate_target = min(2500, max(int(grade_profile["candidate_floor"]), target * int(grade_profile["candidate_multiplier"])))
     pool: Dict[Tuple[int, ...], Tuple[float, Dict[str, Any]]] = {}
     attempts = 0
     while len(pool) < candidate_target and attempts < candidate_target * 5:
@@ -506,7 +551,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
     selected: List[List[int]] = []
     selected_details: List[Dict[str, Any]] = []
     usage: Counter = Counter()
-    strategy_cycle = ["균형형", "최근 흐름형", "반등 혼합형", "동반출현형"]
+    strategy_cycle = list(grade_profile["strategy_cycle"])
     candidate_rank = {combo: index + 1 for index, (combo, _) in enumerate(ranked)}
     available = {combo: (score, detail) for combo, (score, detail) in ranked}
 
@@ -520,7 +565,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             # For a normal 10-combination portfolio, four or more shared
             # numbers makes tickets too similar. Larger exports retain a
             # slightly looser limit so generation cannot deadlock.
-            overlap_limit = 4 if target <= 20 else 5
+            overlap_limit = int(grade_profile["overlap_limit"]) if target <= 20 else 4
             if overlap >= overlap_limit:
                 continue
             strategy_bonus, strategy_components = _strategy_fit(combo, detail, cache, strategy, member_profile)
@@ -726,8 +771,14 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         "hot": cache.get("hot", [])[:12], "cold": cache.get("cold", [])[:12], "overdue": cache.get("overdue", [])[:12],
         "unique_numbers": len(usage), "max_number_use": max(usage.values(), default=0),
         "ai_lab_profile_applied": bool(lab_weight_profile),
+        "member_grade": grade_key,
+        "grade_strategy": grade_profile["name"],
+        "grade_strategy_cycle": list(strategy_cycle),
+        "analysis_round_range": cache.get("round_range", [0, 0]),
+        "is_full_history": bool(cache.get("is_full_history")),
+        "missing_rounds_count": int(cache.get("missing_rounds_count", 0) or 0),
         "member_adaptation": {"enabled": bool(member_profile.get("enabled")), "member_id": int(member_id or 0), "evaluated_runs": int(member_profile.get("evaluated_runs", 0) or 0), "confidence": float(member_profile.get("confidence", 0) or 0), "best_strategy": member_profile.get("best_strategy") or "균형형", "safety": member_profile.get("safety") or {}},
-        "methodology": ["AI-01 영구 캐시 기반", "1회차~최신 회차 전체 분석", "최근 10·30·50·100·300회 다중 가중치", "미출현 간격·모멘텀", "동반출현·트리플", "홀짝·구간·합계·AC·끝수", "조합 간 중복 억제", "전략별 포트폴리오 재평가", "번호 반복·구간 편중 동적 보정"],
+        "methodology": ["AI-01 영구 캐시 기반", "1회차~최신 회차 전체 분석", "최근 10·30·50·100·300회 다중 가중치", "전체 누적 빈도·장기 안정성", "미출현 간격·모멘텀", "최근·전체 동반출현 및 트리플", "홀짝·구간·합계·AC·끝수·연속수", "등급별 전용 가중치·전략 순환", "조합 간 중복 억제", "전략별 포트폴리오 재평가", "번호 반복·구간 편중 동적 보정"],
     }
     return selected[:target], selected_details[:target], stats
 

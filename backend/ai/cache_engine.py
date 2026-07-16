@@ -16,7 +16,7 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-CACHE_ENGINE_VERSION = "BBLOTTO_AI_CACHE_V13_05_CONNECTION_FIX"
+CACHE_ENGINE_VERSION = "BBLOTTO_AI_CACHE_V14_1_FULL_LINKAGE"
 _CACHE_KEY = "full_history_statistics"
 _LOCK = threading.RLock()
 _MEMORY: Dict[str, Any] = {}
@@ -477,8 +477,10 @@ def _materialize(draws: List[Dict[str, Any]], started: float, update_mode: str, 
     gaps = {n: len(draws) if last_seen[n] < 0 else len(draws) - 1 - last_seen[n] for n in range(1, 46)}
 
     pair_all: Counter = Counter()
+    triple_all: Counter = Counter()
     for draw in draws:
         pair_all.update(combinations(draw["numbers"], 2))
+        triple_all.update(combinations(draw["numbers"], 3))
     recent = draws[-100:]
     pair_recent: Counter = Counter()
     triple_recent: Counter = Counter()
@@ -528,6 +530,7 @@ def _materialize(draws: List[Dict[str, Any]], started: float, update_mode: str, 
         "target_round": latest_round + 1 if latest_round else 1,
         "is_full_history": bool(draws and first_round == 1 and not missing_rounds),
         "missing_rounds_count": len(missing_rounds), "missing_rounds_sample": missing_rounds[:20],
+        "analysis_windows": [10, 30, 50, 100, 300, "all"],
         "frequency10": {str(n): frequencies[10][n] for n in range(1, 46)},
         "frequency30": {str(n): frequencies[30][n] for n in range(1, 46)},
         "frequency50": {str(n): frequencies[50][n] for n in range(1, 46)},
@@ -542,7 +545,9 @@ def _materialize(draws: List[Dict[str, Any]], started: float, update_mode: str, 
         "pair_recent_top": [[list(pair), count] for pair, count in pair_recent.most_common(100)],
         "triple_recent_top": [[list(triple), count] for triple, count in triple_recent.most_common(50)],
         "pair_counts": {f"{a}-{b}": count for (a, b), count in pair_recent.items()},
+        "pair_all_counts": {f"{a}-{b}": count for (a, b), count in pair_all.items()},
         "triple_counts": {"-".join(map(str, triple)): count for triple, count in triple_recent.items()},
+        "triple_all_counts": {"-".join(map(str, triple)): count for triple, count in triple_all.items()},
         "pattern": {
             "sum_mean": round(sum_mean, 2), "sum_sd": round(sum_sd, 2),
             "odd_mean": round(average("odd", 3), 2), "ac_mean": round(average("ac", 7), 2),
@@ -560,6 +565,8 @@ def _refresh(force: bool = False) -> Dict[str, Any]:
     started = time.perf_counter()
     source_engine, first_round, latest_round, count = _source_signature()
     persisted = None if force else _load_persisted()
+    if persisted and str(persisted.get("engine_version", "")) != CACHE_ENGINE_VERSION:
+        persisted = None
     history = list((persisted or {}).get("_draw_history") or [])
     cached_latest = int((persisted or {}).get("latest_round", 0))
     cached_count = int((persisted or {}).get("draw_count", 0))
