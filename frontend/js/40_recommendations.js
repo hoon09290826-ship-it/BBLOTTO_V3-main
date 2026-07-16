@@ -10,7 +10,7 @@ async function saveCurrentRecommendation(){
     member_id:Number(mid), member_name:member?.name||'', round_no:Number(currentRound||0),
     mode:$('genMode')?.value||'balanced', combos,
     analysis:String(currentAnalysis||''), sms:String($('smsPreview')?.value||currentSms||''),
-    details:Array.isArray(currentDetails)?currentDetails:[], engine:{}
+    details:Array.isArray(currentDetails)?currentDetails:[], engine:(currentEngine&&typeof currentEngine==='object'?currentEngine:{})
   };
   const d=await api('/api/recommendations/save',{method:'POST',body:payload});
   currentRecId=d.id||null;
@@ -258,6 +258,7 @@ async function generate(){
     if(!currentCombos.length) throw new Error('추천번호 API가 조합을 반환하지 않았습니다.');
     if(currentCombos.length !== Number(body.count)) console.warn('요청 조합수와 생성 조합수가 다릅니다.', body.count, currentCombos.length);
     currentDetails=d.details||[];
+    currentEngine=(d.engine&&typeof d.engine==='object')?d.engine:{};
     currentRound=d.round||d.round_no||body.round_no||'';
     const fallback = buildFallbackAnalysis(currentCombos, latestStatsCache, body.mode);
     currentAnalysis=normalizeText(d.analysis||d.ai_analysis||d.engine?.summary||fallback).trim() || fallback;

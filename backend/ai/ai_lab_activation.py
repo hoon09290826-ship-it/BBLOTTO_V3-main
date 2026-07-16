@@ -39,7 +39,7 @@ def load_stable_profile(c: Any) -> Dict[str, Any]:
     """Return the currently approved Stable profile. Empty dict means safe legacy fallback."""
     ensure_activation_tables(c)
     row = c.execute(
-        "SELECT v.id AS version_id,v.version_name,v.engine_code_version,v.profile_id,p.name AS profile_name,p.weights_json,p.fingerprint "
+        "SELECT v.id AS version_id,v.version_name,v.engine_code_version,v.profile_id,v.metrics_json,p.name AS profile_name,p.weights_json,p.fingerprint "
         "FROM ai_engine_versions v JOIN ai_weight_profiles p ON p.id=v.profile_id "
         "WHERE v.status='stable' ORDER BY v.id DESC LIMIT 1"
     ).fetchone()
@@ -50,6 +50,8 @@ def load_stable_profile(c: Any) -> Dict[str, Any]:
     if not isinstance(weights, dict) or not weights:
         return {}
     item["weights"] = weights
+    item["metrics"] = _loads(item.pop("metrics_json", "{}"), {})
+    item["backtest_run_id"] = int((item["metrics"] or {}).get("backtest_run_id") or 0)
     item["activation_version"] = ACTIVATION_VERSION
     return item
 

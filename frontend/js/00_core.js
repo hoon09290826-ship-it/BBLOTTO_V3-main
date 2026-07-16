@@ -35,6 +35,7 @@ let currentDetails = [];
 let currentSms = '';
 let currentAnalysis = '';
 let currentRecommendationAnalysis = '';
+let currentEngine = {};
 let currentRound = '';
 let nextGenerationRound = 0;
 let currentRecId = null;
@@ -64,7 +65,7 @@ const WORKSPACE_KEY = 'bb_v50_workspace_state';
 function saveWorkspaceState(){
   try{
     const state = {
-      currentCombos, currentDetails, currentSms, currentAnalysis, currentRecommendationAnalysis, currentRound, currentRecId,
+      currentCombos, currentDetails, currentSms, currentAnalysis, currentRecommendationAnalysis, currentEngine, currentRound, currentRecId,
       selectedMemberId: $('genMember')?.value || '',
       template: $('template')?.value || '',
       bulkSmsTemplate: $('bulkSmsTemplate')?.value || '',
@@ -83,6 +84,7 @@ function restoreWorkspaceState(){
     currentDetails = Array.isArray(st.currentDetails) ? st.currentDetails : [];
     currentSms = normalizeText(st.currentSms || '');
     currentAnalysis = normalizeText(st.currentAnalysis || '');
+    currentEngine = (st.currentEngine && typeof st.currentEngine === 'object') ? st.currentEngine : {};
     currentRound = st.currentRound || '';
     currentRecId = st.currentRecId || null;
     if(st.selectedMemberId && $('genMember')) $('genMember').value = st.selectedMemberId;
@@ -107,6 +109,7 @@ async function restoreLatestRecommendationFromServer(){
     currentRound = d.round_no || latest.round_no || '';
     currentAnalysis = normalizeText(d.analysis || latest.analysis || '');
     currentSms = normalizeText(d.sms || latest.sms || '');
+    currentEngine = (d.engine && typeof d.engine === 'object') ? d.engine : (()=>{ try{return JSON.parse(d.engine_json||'{}')}catch(_){return {}} })();
     if(d.member_id && $('genMember')) $('genMember').value = String(d.member_id);
     if(currentRound) setText('roundLabel', `${currentRound}회차 추천번호 · 마지막 이력 복원`);
     renderCombos(currentCombos, currentDetails);

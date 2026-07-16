@@ -45,6 +45,12 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     sms=clean_template_text(build_sms(member_name, safe_round, combos, analysis, details))
     engine=_engine_summary(details, st)
     engine['phase']='RC6-D8.1-FULL-HISTORY-PORTFOLIO'
+    engine['ai_lab_stable_version_id']=int(stable_lab.get('version_id') or 0)
+    engine['ai_lab_stable_version_name']=stable_lab.get('version_name') or ''
+    engine['ai_lab_profile_id']=int(stable_lab.get('profile_id') or 0)
+    engine['ai_lab_profile_name']=stable_lab.get('profile_name') or ''
+    engine['ai_lab_profile_applied']=bool(stable_lab.get('weights'))
+    engine['ai_lab_backtest_run_id']=int(stable_lab.get('backtest_run_id') or 0)
     recommendation_analysis=clean_template_text(_stable13_build_recommendation(safe_round, details))
     engine['member_grade']=member_grade
     engine['grade_strength']=rc45_grade_strength_text(member_grade)
@@ -79,7 +85,9 @@ def save_recommendation(req:SaveRecommendationReq, request:Request, authorizatio
             'member_id':'INTEGER','member_name':'TEXT DEFAULT ""','round_no':'INTEGER DEFAULT 0',
             'mode':'TEXT DEFAULT "balanced"','count':'INTEGER DEFAULT 0','numbers':'TEXT DEFAULT "[]"','analysis':'TEXT DEFAULT ""','sms':'TEXT DEFAULT ""',
             'created_by':'INTEGER DEFAULT 0','created_at':'TEXT DEFAULT ""',
-            'avg_score':'REAL DEFAULT 0','grade':'TEXT DEFAULT "일반"','engine_json':'TEXT DEFAULT "{}"','details_json':'TEXT DEFAULT "[]"','explicit_saved':'INTEGER DEFAULT 0'
+            'avg_score':'REAL DEFAULT 0','grade':'TEXT DEFAULT "일반"','engine_json':'TEXT DEFAULT "{}"','details_json':'TEXT DEFAULT "[]"','explicit_saved':'INTEGER DEFAULT 0',
+            'engine_version':'TEXT DEFAULT ""','ai_lab_version_id':'INTEGER DEFAULT 0','ai_lab_version_name':'TEXT DEFAULT ""',
+            'ai_lab_profile_id':'INTEGER DEFAULT 0','ai_lab_profile_name':'TEXT DEFAULT ""','ai_lab_backtest_run_id':'INTEGER DEFAULT 0'
         }.items():
             if col not in rec_cols:
                 c.execute(f'ALTER TABLE recommendations ADD COLUMN {col} {ddl}')
@@ -90,7 +98,13 @@ def save_recommendation(req:SaveRecommendationReq, request:Request, authorizatio
             'mode':req.mode or 'balanced','count':len(combos),'numbers':json.dumps(combos,ensure_ascii=False),
             'analysis':clean_template_text(req.analysis or ''),'sms':clean_template_text(req.sms or ''),
             'created_by':admin['id'],'created_at':now(),'avg_score':float(engine.get('avg_score') or 0),
-            'grade':member_grade,'engine_json':json.dumps(engine,ensure_ascii=False),'details_json':json.dumps(req.details or [],ensure_ascii=False),'explicit_saved':1
+            'grade':member_grade,'engine_json':json.dumps(engine,ensure_ascii=False),'details_json':json.dumps(req.details or [],ensure_ascii=False),'explicit_saved':1,
+            'engine_version':str(engine.get('engine_version') or engine.get('version') or ''),
+            'ai_lab_version_id':int(engine.get('ai_lab_stable_version_id') or 0),
+            'ai_lab_version_name':str(engine.get('ai_lab_stable_version_name') or ''),
+            'ai_lab_profile_id':int(engine.get('ai_lab_profile_id') or 0),
+            'ai_lab_profile_name':str(engine.get('ai_lab_profile_name') or ''),
+            'ai_lab_backtest_run_id':int(engine.get('ai_lab_backtest_run_id') or 0)
         }
         cols=[k for k in data if k in rec_cols]
         cur=c.execute('INSERT INTO recommendations('+','.join(cols)+') VALUES('+','.join(['?']*len(cols))+')',[data[k] for k in cols])
@@ -114,6 +128,8 @@ def recommendation_detail(rec_id:int, authorization: str|None = Header(default=N
         r=c.execute('SELECT * FROM recommendations WHERE id=?',(rec_id,)).fetchone()
     if not r: raise HTTPException(404,'추천번호를 찾을 수 없습니다.')
     d=dict(r); d['numbers']=json.loads(d.get('numbers') or '[]')
+    try: d['engine']=json.loads(d.get('engine_json') or '{}')
+    except Exception: d['engine']={}
     st=latest_stats(120)
     try:
         d['details']=json.loads(d.get('details_json') or '[]')
@@ -182,14 +198,25 @@ def save_sms(req:SmsReq, request:Request, authorization: str|None = Header(defau
     sent_at = now() if result['status'] in ('sent','sent_mock') else ''
     with con() as c:
         sms_cols=table_cols(c,'sms_logs')
-        if 'recommendation_id' not in sms_cols:
-            c.execute('ALTER TABLE sms_logs ADD COLUMN recommendation_id INTEGER DEFAULT 0')
-            sms_cols=table_cols(c,'sms_logs')
+        for col, ddl in {
+            'recommendation_id':'INTEGER DEFAULT 0','engine_version':'TEXT DEFAULT ""','ai_lab_version_id':'INTEGER DEFAULT 0',
+            'ai_lab_version_name':'TEXT DEFAULT ""','ai_lab_profile_name':'TEXT DEFAULT ""','ai_lab_backtest_run_id':'INTEGER DEFAULT 0'
+        }.items():
+            if col not in sms_cols:
+                c.execute(f'ALTER TABLE sms_logs ADD COLUMN {col} {ddl}')
+        sms_cols=table_cols(c,'sms_logs')
+        trace={}
+        if req.recommendation_id:
+            rec=c.execute('SELECT engine_version,ai_lab_version_id,ai_lab_version_name,ai_lab_profile_name,ai_lab_backtest_run_id FROM recommendations WHERE id=?',(int(req.recommendation_id),)).fetchone()
+            trace=dict(rec) if rec else {}
         values={
             'member_id':req.member_id,'member_name':name,'phone':normalize_phone(phone),'round_no':req.round_no,
             'body':req.body,'combos':json.dumps(req.combos,ensure_ascii=False),'provider':result.get('provider','mock'),
             'status':result.get('status','saved'),'result_message':result.get('message',''),'sent_at':sent_at,
-            'created_by':admin['id'],'created_at':now(),'recommendation_id':int(req.recommendation_id or 0)
+            'created_by':admin['id'],'created_at':now(),'recommendation_id':int(req.recommendation_id or 0),
+            'engine_version':trace.get('engine_version',''),'ai_lab_version_id':int(trace.get('ai_lab_version_id') or 0),
+            'ai_lab_version_name':trace.get('ai_lab_version_name',''),'ai_lab_profile_name':trace.get('ai_lab_profile_name',''),
+            'ai_lab_backtest_run_id':int(trace.get('ai_lab_backtest_run_id') or 0)
         }
         cols=[k for k in values if k in sms_cols]
         cur=c.execute('INSERT INTO sms_logs('+','.join(cols)+') VALUES('+','.join(['?']*len(cols))+')',[values[k] for k in cols])
