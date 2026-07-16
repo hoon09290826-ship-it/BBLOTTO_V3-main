@@ -41,6 +41,30 @@ from .ai.ai_lab_activation import (
 )
 
 
+
+
+def _ai_lab_latest_admin_backtest(c):
+    try:
+        row=c.execute("SELECT * FROM backtest_runs WHERE status='completed' ORDER BY id DESC LIMIT 1").fetchone()
+        if not row:
+            return {}
+        run=dict(row)
+        try:
+            summary=rc6_get_summary(c, int(run['id']))
+        except Exception:
+            summary={}
+        return {'run':run,'summary':summary.get('summary',{}),'by_window':summary.get('by_window',{}),'backtest_version':summary.get('backtest_version',run.get('backtest_version',''))}
+    except Exception:
+        return {}
+
+@router.get('/api/ai-lab/backtest-link')
+def ai_lab_backtest_link(authorization: str | None = Header(default=None)):
+    admin=require_admin(authorization)
+    require_super_admin(admin)
+    with con() as c:
+        item=_ai_lab_latest_admin_backtest(c)
+    return {'ok':True,'linked':bool(item),'item':item}
+
 class AiLabProfileReq(BaseModel):
     name: str
     description: str = ''
@@ -122,6 +146,20 @@ def ai_lab_job_create(req: AiLabJobReq, request: Request, authorization: str | N
         with con() as c:
             ai_lab_bootstrap(c, engine_code_version=ENGINE_VERSION, created_by=int(admin['id']))
             item = ai_lab_create_job(c, range_type=req.range_type, candidate_limit=req.candidate_limit, random_seed=req.random_seed, created_by=int(admin['id']))
+            linked_backtest = _ai_lab_latest_admin_backtest(c)
+            if linked_backtest:
+                current_result = item.get('result') if isinstance(item, dict) else {}
+                if not isinstance(current_result, dict): current_result={}
+                current_result['admin_backtest_link']={
+                    'run_id':int(linked_backtest.get('run',{}).get('id') or 0),
+                    'completed_at':linked_backtest.get('run',{}).get('completed_at') or '',
+                    'engine_version':linked_backtest.get('run',{}).get('engine_version') or '',
+                    'backtest_version':linked_backtest.get('backtest_version') or '',
+                    'summary':linked_backtest.get('summary') or {}
+                }
+                c.execute('UPDATE ai_learning_jobs SET result_json=?,updated_at=? WHERE id=?',(json.dumps(current_result,ensure_ascii=False),now(),int(item['id'])))
+                c.commit()
+                item=ai_lab_get_job(c,int(item['id']))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     log_action(admin, 'AI_LAB_JOB_CREATE', f"AI LAB 학습 작업 #{item['id']} 생성", request)

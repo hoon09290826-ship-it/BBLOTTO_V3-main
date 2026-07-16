@@ -56,9 +56,11 @@ async function safeGet(url,fallback){try{return await api(url);}catch(e){console
 async function loadAll(){
  setBusy(true);
  try{
-  const [o,s,v,a,n,j]=await Promise.all([
-   safeGet('/api/ai-lab/overview',{counts:{},stable:{},active_job:null}),safeGet('/api/ai-lab/stable',{item:{}}),safeGet('/api/ai-lab/versions?limit=50',{items:[]}),safeGet('/api/ai-lab/activations?limit=50',{items:[]}),safeGet('/api/ai-lab/notes?limit=50',{items:[]}),safeGet('/api/ai-lab/jobs?limit=20',{items:[]})]);
+  const [o,s,v,a,n,j,bt]=await Promise.all([
+   safeGet('/api/ai-lab/overview',{counts:{},stable:{},active_job:null}),safeGet('/api/ai-lab/stable',{item:{}}),safeGet('/api/ai-lab/versions?limit=50',{items:[]}),safeGet('/api/ai-lab/activations?limit=50',{items:[]}),safeGet('/api/ai-lab/notes?limit=50',{items:[]}),safeGet('/api/ai-lab/jobs?limit=20',{items:[]}),safeGet('/api/ai-lab/backtest-link',{linked:false,item:{}})]);
   renderStable(s.item||o.stable);renderKpis(o);
+  const link=bt?.item?.run||{};const linkSummary=bt?.item?.summary||{};const progressNode=el('aiLabProgressText');
+  if(progressNode&&bt?.linked&&!activeJob){progressNode.textContent=`관리자 백테스트 #${link.id} 연동 · ${link.start_round||'-'}~${link.end_round||'-'}회 · 평균 최고일치 ${fmt(linkSummary.avg_best_match||0,2)} · AI LAB 작업 생성 시 기준정보로 저장됩니다.`;}
   const jobs=(Array.isArray(j.items)?j.items:[]).map(normalizeJob).filter(Boolean);activeJob=jobs.find(isActive)||normalizeJob(o.active_job)||jobs[0]||null;progress(activeJob);
   renderVersions(v.items||[],(s.item||{}).version_id||(o.stable||{}).id);renderActivations(a.items||[]);renderNotes(n.items||[]);
   if(normalizeJob(activeJob)){const r=await safeGet(`/api/ai-lab/jobs/${activeJob.id}/rankings`,{items:[]});renderRankings(r.items||[]);}else renderRankings([]);

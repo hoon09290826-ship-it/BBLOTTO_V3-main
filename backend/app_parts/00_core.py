@@ -1699,7 +1699,7 @@ class MemberNoteReq(BaseModel): note:str; note_type:str='상담'
 class MemberBulkStatusReq(BaseModel): member_ids:list[int]; status:str
 class GenerateReq(BaseModel): member_id:int|None=None; round_no:int|None=None; count:int=10; mode:str='balanced'; fixed:str=''; excluded:str=''; exclude:str='' # exclude는 기존 프론트 호환용
 class SaveRecommendationReq(BaseModel): member_id:int|None=None; member_name:str=''; round_no:int; mode:str='balanced'; combos:list[list[int]]=[]; analysis:str=''; sms:str=''; details:list[dict]=[]; engine:dict={}
-class SmsReq(BaseModel): member_id:int|None=None; member_name:str=''; phone:str=''; round_no:int; body:str; combos:list[list[int]]=[]; send_now:bool=False
+class SmsReq(BaseModel): member_id:int|None=None; member_name:str=''; phone:str=''; round_no:int; body:str; combos:list[list[int]]=[]; send_now:bool=False; recommendation_id:int|None=None
 class WinReq(BaseModel): round_no:int; win_numbers:list[int]=[]; bonus:int=0; combos:list[list[int]]=[]; member_id:int|None=None; member_name:str=''
 class DrawReq(BaseModel): round_no:int; draw_date:str=''; numbers:list[int]; bonus:int
 class AutoWinReq(BaseModel): round_no:int; winning:str|list[int]=''; bonus:int=0; draw_date:str=''

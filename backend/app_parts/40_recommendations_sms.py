@@ -181,7 +181,18 @@ def save_sms(req:SmsReq, request:Request, authorization: str|None = Header(defau
     result = send_sms_provider(phone, req.body) if req.send_now else {'status':'saved','provider':get_setting_value('sms_provider','mock'),'message':'발송하지 않고 이력만 저장했습니다.'}
     sent_at = now() if result['status'] in ('sent','sent_mock') else ''
     with con() as c:
-        cur=c.execute('INSERT INTO sms_logs(member_id,member_name,phone,round_no,body,combos,provider,status,result_message,sent_at,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(req.member_id,name,normalize_phone(phone),req.round_no,req.body,json.dumps(req.combos,ensure_ascii=False),result.get('provider','mock'),result.get('status','saved'),result.get('message',''),sent_at,admin['id'],now()))
+        sms_cols=table_cols(c,'sms_logs')
+        if 'recommendation_id' not in sms_cols:
+            c.execute('ALTER TABLE sms_logs ADD COLUMN recommendation_id INTEGER DEFAULT 0')
+            sms_cols=table_cols(c,'sms_logs')
+        values={
+            'member_id':req.member_id,'member_name':name,'phone':normalize_phone(phone),'round_no':req.round_no,
+            'body':req.body,'combos':json.dumps(req.combos,ensure_ascii=False),'provider':result.get('provider','mock'),
+            'status':result.get('status','saved'),'result_message':result.get('message',''),'sent_at':sent_at,
+            'created_by':admin['id'],'created_at':now(),'recommendation_id':int(req.recommendation_id or 0)
+        }
+        cols=[k for k in values if k in sms_cols]
+        cur=c.execute('INSERT INTO sms_logs('+','.join(cols)+') VALUES('+','.join(['?']*len(cols))+')',[values[k] for k in cols])
         if req.member_id:
             c.execute('UPDATE members SET last_contact_at=?, updated_at=? WHERE id=?', (now(), now(), req.member_id))
         c.commit(); sid=cur.lastrowid

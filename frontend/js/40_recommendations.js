@@ -41,7 +41,8 @@ async function saveCurrentSmsLog(){
     combos:normalizeCombos(currentCombos),
     send_now:false
   };
-  await saveCurrentRecommendation();
+  const savedRecommendation=await saveCurrentRecommendation();
+  body.recommendation_id=Number(savedRecommendation?.id||currentRecId||0)||null;
   try{ return await api('/api/sms_log',{method:'POST',body}); }
   catch(e){ return await api('/api/sms',{method:'POST',body}); }
 }
@@ -87,7 +88,9 @@ window.generateMemberCopyAndSave = safe(async function(id, btn){
     if(!String(currentAnalysis||'').trim()) throw new Error('분석요약 생성 확인에 실패했습니다.');
     const text = ($('smsPreview')?.value || currentSms || '').trim();
     await copyTextToClipboard(text);
-    await saveCurrentSmsLog();
+    const savedSms=await saveCurrentSmsLog();
+    if(!currentRecId) throw new Error('추천번호 저장 연동 확인에 실패했습니다.');
+    if(!savedSms || (!savedSms.id && !savedSms.ok)) throw new Error('보낸문자 저장 연동 확인에 실패했습니다.');
     await Promise.all([loadDashboard(), loadMembers()]);
     if($('genMember')) $('genMember').value=String(id);
     showMemberQuickResult(m, currentCombos, currentAnalysis, true, true);
