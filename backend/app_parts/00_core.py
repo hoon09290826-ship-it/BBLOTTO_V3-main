@@ -704,8 +704,28 @@ def init_db():
             c.execute('INSERT INTO admins(username,name,password_hash,is_active,created_at) VALUES(?,?,?,?,?)', (init_username,'대표 관리자',hash_password(init_password),1,now()))
         # 기본 당첨번호 DB는 비어 있을 때만 넣는 방식이 아니라, 누락 회차를 항상 보강합니다.
         # 그래서 기존 DB에 20회차만 남아 있어도 최근 100회 통계가 바로 동작합니다.
+        repaired_draw_rows = 0
         for r,d,n,b in DEFAULT_DRAWS:
             c.execute('INSERT OR IGNORE INTO draws(round_no,draw_date,numbers,bonus,source,updated_at) VALUES(?,?,?,?,?,?)', (r,d,json.dumps(n),b,'starter100',now()))
+            # 기존 운영 DB에 잘못 저장된 보너스(본번호와 중복)만 공식 기본 데이터로 안전하게 복구합니다.
+            # 정상적인 수동/API 데이터는 덮어쓰지 않습니다.
+            existing_draw = c.execute('SELECT numbers, bonus FROM draws WHERE round_no=?', (r,)).fetchone()
+            if existing_draw:
+                existing_numbers = parse_nums(existing_draw['numbers'])
+                existing_bonus = int(existing_draw['bonus'] or 0)
+                if len(existing_numbers) == 6 and existing_bonus in existing_numbers and b not in n:
+                    c.execute(
+                        'UPDATE draws SET draw_date=?, numbers=?, bonus=?, source=?, updated_at=? WHERE round_no=?',
+                        (d, json.dumps(n), b, 'starter_repair', now(), r)
+                    )
+                    repaired_draw_rows += 1
+        if repaired_draw_rows:
+            # 분석 캐시는 회차 수가 같아도 내용이 바뀌면 재생성되어야 합니다.
+            try:
+                c.execute('DELETE FROM ai_analysis_cache')
+            except Exception:
+                pass
+            logger.warning('invalid draw bonus rows repaired count=%s', repaired_draw_rows)
         default_sms = '안녕하세요 {회원명}님, BBLOTTO입니다.\n{회차}회차 추천번호 및 이번회차 분석입니다.\n\n[이번회차 핵심 분석]\n{분석}\n\n[추천번호]\n{추천번호}\n\n좋은 결과 있으시길 바랍니다.'
         c.execute('INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)', ('sms_template', default_sms, now()))
         current_sms = c.execute('SELECT value FROM settings WHERE key=?', ('sms_template',)).fetchone()
@@ -977,7 +997,7 @@ def start_auto_backup_worker():
         threading.Thread(target=_auto_backup_worker, name='bblotto-auto-backup', daemon=True).start()
 
 from backend.migration_runner import run_versioned_migrations
-run_versioned_migrations(con, init_db, logger, version=8)
+run_versioned_migrations(con, init_db, logger, version=9)
 ensure_daily_backup()
 start_auto_backup_worker()
 
