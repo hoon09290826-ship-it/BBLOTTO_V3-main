@@ -130,11 +130,10 @@ def save_draw(req:DrawReq, request:Request, authorization: str|None = Header(def
 
 
 def _auto_check_round(admin, req:AutoWinReq, request:Request):
-    """회원별로 명시 저장된 추천 조합만 당첨 확인합니다.
+    """선택 회차에 실제 저장된 보낸문자(문구이력)의 추천 조합만 당첨 확인합니다.
 
-    같은 회원의 동일 조합은 추천 이력/SMS 이력에 여러 번 존재해도 한 번만
-    계산하며, 해당 회차의 기존 결과는 관리자 권한 범위 안에서 먼저 정리한 뒤
-    현재 저장 조합으로 다시 작성합니다.
+    같은 회차의 문구이력이 여러 건이면 모든 이력을 검사하며, 추천 미리보기나
+    별도 추천 저장 내역은 포함하지 않습니다.
     """
     if not int(req.round_no or 0):
         req.round_no = expected_lotto_round()
@@ -194,20 +193,9 @@ def _auto_check_round(admin, req:AutoWinReq, request:Request):
             scope_sql = ' AND COALESCE(m.created_by,0)=?'
             scope_args = [int(admin.get('id') or 0)]
 
-        rec_rows = [dict(r) for r in c.execute(f'''
-            SELECT r.id AS source_id, 'recommendation' AS source_type,
-                   r.member_id,
-                   COALESCE(NULLIF(r.member_name,''),m.name,'회원명 미확인') AS member_name,
-                   r.numbers
-            FROM recommendations r
-            INNER JOIN members m ON m.id=r.member_id
-            WHERE r.round_no=?
-              AND COALESCE(r.member_id,0)>0
-              AND COALESCE(r.explicit_saved,0)=1
-              {scope_sql}
-            ORDER BY m.name ASC,r.id DESC
-        ''', [req.round_no, *scope_args]).fetchall()]
-
+        # 당첨확인 대상은 선택 회차에 실제로 저장된 보낸문자(문구이력)만 사용합니다.
+        # 추천 미리보기/추천 저장 테이블은 포함하지 않으며, 같은 회차에 저장된
+        # 문구이력이 여러 건이면 모든 이력을 각각 검사합니다.
         sms_rows = [dict(r) for r in c.execute(f'''
             SELECT s.id AS source_id, 'sms' AS source_type,
                    s.member_id,
@@ -219,32 +207,37 @@ def _auto_check_round(admin, req:AutoWinReq, request:Request):
               AND COALESCE(s.member_id,0)>0
               AND COALESCE(s.combos,'') NOT IN ('','[]')
               {scope_sql}
-            ORDER BY m.name ASC,s.id DESC
+            ORDER BY m.name ASC,s.id ASC
         ''', [req.round_no, *scope_args]).fetchall()]
 
         combo_records = []
-        seen_combo = set()
         source_keys_by_member = {}
         member_names = {}
-        for row in [*rec_rows, *sms_rows]:
+        for row in sms_rows:
             mid = int(row.get('member_id') or 0)
             if mid <= 0:
                 continue
             member_names[mid] = row.get('member_name') or '회원명 미확인'
             valid_combos = normalize_saved_combos(row.get('numbers'))
-            if valid_combos:
-                source_keys_by_member.setdefault(mid, set()).add((row.get('source_type'), int(row.get('source_id') or 0)))
+            if not valid_combos:
+                continue
+            source_id = int(row.get('source_id') or 0)
+            source_keys_by_member.setdefault(mid, set()).add(('sms', source_id))
+
+            # 동일 문구이력 내부의 완전히 같은 조합만 중복 제거합니다.
+            # 서로 다른 문구이력에 저장된 조합은 각각 실제 발송 이력이므로 모두 계산합니다.
+            seen_in_log = set()
             for combo in valid_combos:
-                key = (mid, tuple(combo))
-                if key in seen_combo:
+                combo_key = tuple(combo)
+                if combo_key in seen_in_log:
                     continue
-                seen_combo.add(key)
+                seen_in_log.add(combo_key)
                 combo_records.append({
                     'member_id': mid,
                     'member_name': member_names[mid],
                     'combo': combo,
-                    'source_id': int(row.get('source_id') or 0),
-                    'source_type': row.get('source_type') or 'recommendation',
+                    'source_id': source_id,
+                    'source_type': 'sms',
                 })
 
         if is_super_admin(admin):
@@ -317,6 +310,7 @@ def _auto_check_round(admin, req:AutoWinReq, request:Request):
     hit_combos = sum(1 for x in checked if x.get('rank') != '낙첨')
     summary = {
         'members': len(member_results),
+        'sms_history_count': sum(len(v) for v in source_keys_by_member.values()),
         'recommendations': sum(len(v) for v in source_keys_by_member.values()),
         'checked_combos': len(checked),
         'hit_members': sum(1 for m in member_results if m.get('hit_count', 0) > 0),
