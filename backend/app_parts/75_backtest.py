@@ -1,3 +1,4 @@
+from .ai.ai_lab_activation import load_stable_profile as ai_lab_load_stable_profile
 from .ai.backtest_engine import (
     BACKTEST_VERSION,
     cancel_run as rc6_cancel_run,
@@ -36,7 +37,25 @@ def backtest_step(run_id: int, step_size: int = 2, authorization: str | None = H
     require_super_admin(admin)
     try:
         with con() as c:
-            result = rc6_process_step(c, run_id, step_size=step_size)
+            stable = ai_lab_load_stable_profile(c) or {}
+            profile_label = (
+                f"stable:{int(stable.get('version_id') or 0)}:"
+                f"{stable.get('profile_name') or 'legacy'}"
+            )
+            result = rc6_process_step(
+                c,
+                run_id,
+                step_size=step_size,
+                weight_profile=(stable.get('weights') or None),
+                profile_label=profile_label,
+            )
+            result['stable_profile'] = {
+                'version_id': int(stable.get('version_id') or 0),
+                'version_name': stable.get('version_name') or '',
+                'profile_id': int(stable.get('profile_id') or 0),
+                'profile_name': stable.get('profile_name') or '',
+                'applied': bool(stable.get('weights')),
+            }
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     return {'ok': True, 'backtest_version': BACKTEST_VERSION, **result}

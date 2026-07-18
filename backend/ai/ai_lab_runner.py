@@ -12,6 +12,7 @@ from .ai_lab_core import (
     get_job,
     safe_int,
 )
+from .ai_lab_activation import load_stable_profile
 from .backtest_engine import (
     BACKTEST_VERSION,
     cancel_run,
@@ -165,7 +166,18 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
         raise RuntimeError("기준 백테스트 실행 정보가 없습니다.")
 
     try:
-        result = process_step(c, run_id, step_size=max(1, min(5, safe_int(step_size, 1, minimum=1, maximum=5))))
+        stable = load_stable_profile(c) or {}
+        stable_label = (
+            f"stable:{safe_int(stable.get('version_id'), 0, minimum=0)}:"
+            f"{stable.get('profile_name') or 'legacy'}"
+        )
+        result = process_step(
+            c,
+            run_id,
+            step_size=max(1, min(5, safe_int(step_size, 1, minimum=1, maximum=5))),
+            weight_profile=(stable.get('weights') or None),
+            profile_label=stable_label,
+        )
         run = result["run"]
         status = "baseline_completed" if result.get("done") else "running"
         started_at_sql = "started_at=CASE WHEN started_at='' THEN ? ELSE started_at END,"
@@ -195,6 +207,13 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
                 "by_strategy": by_strategy,
                 "operating_engine_changed": False,
                 "optimizer_executed": False,
+                "stable_profile": {
+                    "version_id": safe_int(stable.get("version_id"), 0, minimum=0),
+                    "version_name": stable.get("version_name") or "",
+                    "profile_id": safe_int(stable.get("profile_id"), 0, minimum=0),
+                    "profile_name": stable.get("profile_name") or "",
+                    "applied": bool(stable.get("weights")),
+                },
             }
             c.execute(
                 "UPDATE ai_learning_jobs SET status='baseline_completed',processed_rounds=?,target_rounds=?,result_json=?,completed_at=?,updated_at=? WHERE id=?",
