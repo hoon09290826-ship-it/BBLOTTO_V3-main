@@ -452,12 +452,23 @@ def rc3_4_status(authorization: str|None = Header(default=None)):
 
 @router.get('/api/backups/download/{filename}')
 def backup_download(filename:str, token: str|None=None, authorization: str|None = Header(default=None)):
-    require_admin_any(authorization, token)
+    admin = require_admin_any(authorization, token)
     safe = Path(filename).name
     path = EXPORT_DIR / safe
+    # Railway의 로컬 파일은 재배포/재시작 때 사라질 수 있지만 PostgreSQL의
+    # backup_history 행은 유지됩니다. 목록의 과거 파일이 없으면 404를 내지
+    # 않고 현재 DB 전체를 즉시 새 JSON 백업으로 재생성해 다운로드합니다.
+    if not path.exists():
+        rebuilt = create_db_backup('download_rebuild', admin)
+        safe = Path(rebuilt['filename']).name
+        path = EXPORT_DIR / safe
     if not path.exists() or path.suffix.lower() not in ('.db', '.json'):
-        raise HTTPException(404, '백업 파일을 찾을 수 없습니다.')
+        raise HTTPException(500, '백업 파일 재생성에 실패했습니다.')
     media = 'application/json' if path.suffix.lower() == '.json' else 'application/octet-stream'
-    return FileResponse(path, media_type=media, filename=safe)
-
+    return FileResponse(
+        path,
+        media_type=media,
+        filename=safe,
+        headers={'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0'},
+    )
 
