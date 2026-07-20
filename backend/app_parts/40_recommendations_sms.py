@@ -49,6 +49,7 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     analysis=clean_template_text(_stable13_build_analysis(safe_round, st, safe_mode, req.fixed, excluded_value, details, combos))
     sms=clean_template_text(build_sms(member_name, safe_round, combos, analysis, details))
     engine=_engine_summary(details, st)
+    engine['analysis_engine_version']='PROFESSIONAL_REASON_V2_20260720'
     engine['phase']='RC6-D8.1-FULL-HISTORY-PORTFOLIO'
     engine['ai_lab_stable_version_id']=int(stable_lab.get('version_id') or 0)
     engine['ai_lab_stable_version_name']=stable_lab.get('version_name') or ''
