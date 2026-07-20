@@ -394,7 +394,7 @@ function normalizeCombos(combos){
   return [];
 }
 function getDefaultTemplate(){
-  return '안녕하세요 {회원명}님, BBLOTTO입니다.\n\n{회차}회차 추천번호 안내드립니다.\n\n[추천번호]\n{추천번호}\n\n[AI 분석 요약]\n{분석}\n\nAI SCORE: {AI점수}\n최근 데이터와 조합 균형을 기준으로 선별했습니다.\n좋은 결과 있으시길 바랍니다.\n\n발송일: {발송일}';
+  return '안녕하세요 {회원명}님, BBLOTTO입니다.\n\n{회차}회차 추천번호 안내드립니다.\n\n[추천번호]\n{추천번호}\n\n[이번 회차 핵심 분석]\n{분석}\n\n좋은 결과 있으시길 바랍니다.\n\n발송일: {발송일}';
 }
 function getBestAiScore(){
   const scores = (currentDetails || []).map(d=>displayScoreOf(d)).filter(Boolean);
@@ -441,12 +441,6 @@ function renderCombos(sets, details=[]){
     return;
   }
   box.classList.remove('empty');
-  const top3 = top3FromDetails(sets, details);
-  const topHtml = `<div class="top3-panel rc38-top3"><h4>TOP 3 우선 추천 <small>AI Engine V1.0</small></h4><div class="top3-grid">${top3.map(t=>{
-    const d=t.detail||{}; const score=displayScoreOf(d);
-    const nums=(t.nums||[]).map(n=>`<span class="mini-ball ${ballClass(n)}">${n}</span>`).join('');
-    return `<div class="top3-card"><b>${t.idx}조합</b><div class="mini-nums">${nums}</div><span>${gradeLabel(d)} · ${engineLabel(d)} · 품질 ${qualityLabel(d)}</span><strong>${score?score.toFixed(1):'-'}점</strong><em>${starLabel(d)}</em></div>`;
-  }).join('')}</div></div>`;
   const cards = sets.map((arr,i)=>{
     const d = details[i] || {};
     const score = (d.display_score ?? d.score ?? d.vip_score ?? d.ai_score ?? '');
@@ -466,7 +460,7 @@ function renderCombos(sets, details=[]){
       <div class="chip-row">${tags.slice(0,4).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>
     </div>`;
   }).join('');
-  box.innerHTML = topHtml + `<div class="combo-card-grid">${cards}</div>`;
+  box.innerHTML = `<div class="combo-card-grid">${cards}</div>`;
 }
 
 function buildFallbackAnalysis(combos, stats, mode){
@@ -529,7 +523,7 @@ function buildMemberMessage(member, round, combos, analysis){
   const numbers = formatComboLines(combos || currentCombos);
   const analysisText = normalizeText(analysis || currentAnalysis).trim() || '분석 결과 없음';
   const today = new Date().toLocaleDateString('ko-KR');
-  return `안녕하세요 ${name}님, BBLOTTO입니다.\n\n${round || '-'}회차 추천번호 안내드립니다.\n\n[추천번호]\n${numbers}\n\n[AI 분석 요약]\n${analysisText}\n\nAI SCORE: ${getBestAiScore()}\n최근 데이터와 조합 균형을 기준으로 선별했습니다.\n좋은 결과 있으시길 바랍니다.\n\n발송일: ${today}`;
+  return `안녕하세요 ${name}님, BBLOTTO입니다.\n\n${round || '-'}회차 추천번호 안내드립니다.\n\n[추천번호]\n${numbers}\n\n[이번 회차 핵심 분석]\n${analysisText}\n\n좋은 결과 있으시길 바랍니다.\n\n발송일: ${today}`;
 }
 
 function renderAnalysis(text){
@@ -619,4 +613,3 @@ function renderEngine(engine, details=[]){
     <span><b>${filter || '-'}</b><small>최종 선별</small></span>
   </div>`;
 }
-
