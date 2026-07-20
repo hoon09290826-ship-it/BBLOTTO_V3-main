@@ -75,7 +75,7 @@ def process_compare_step(c: Any, job_id: int, *, step_size: int = 2, created_by:
     if active:
         vid, run = active
         candidate = candidates[vid]
-        stepped = process_step(c, int(run["id"]), step_size=max(1, min(5, int(step_size))), weight_profile=candidate.get("weights") or {}, profile_label=f"candidate:{vid}")
+        stepped = process_step(c, int(run["id"]), step_size=max(1, min(25, int(step_size))), weight_profile=candidate.get("weights") or {}, profile_label=f"candidate:{vid}")
         return {"job": get_job(c, job_id), "candidate_version_id": vid, "backtest_run": stepped["run"], "processed": stepped.get("processed", 0), "done": False, "operating_engine_changed": False}
     rankings = finalize_rankings(c, job_id, created_by=created_by)
     return {"job": get_job(c, job_id), "rankings": rankings, "processed": 0, "done": True, "operating_engine_changed": False}

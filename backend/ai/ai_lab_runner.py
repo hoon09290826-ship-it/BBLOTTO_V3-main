@@ -174,7 +174,7 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
         result = process_step(
             c,
             run_id,
-            step_size=max(1, min(5, safe_int(step_size, 1, minimum=1, maximum=5))),
+            step_size=max(1, min(25, safe_int(step_size, 1, minimum=1, maximum=25))),
             weight_profile=(stable.get('weights') or None),
             profile_label=stable_label,
         )

@@ -31,10 +31,11 @@ async function continueRun(){
   stepBusy=true;toggleButtons(true);
   try{
     while(activeRun && !['completed','cancelled','failed'].includes(activeRun.status)){
-      const d=await api(`/api/backtest/runs/${activeRun.id}/step?step_size=5`,{method:'POST'});
+      const d=await api(`/api/backtest/runs/${activeRun.id}/step?step_size=25`,{method:'POST'});
       activeRun=d.run;setProgress(activeRun);
+      if(d.busy){await new Promise(r=>setTimeout(r,350));continue;}
       if(d.done)break;
-      await new Promise(r=>setTimeout(r,80));
+      await new Promise(r=>setTimeout(r,10));
     }
     await loadReport(activeRun.id);toast(activeRun.status==='completed'?'전체 회차 분석이 완료됐습니다.':'백테스트 실행이 멈췄습니다.');
   }catch(e){alert(e.message||e);await refreshRun();}

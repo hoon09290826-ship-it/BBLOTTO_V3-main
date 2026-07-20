@@ -229,7 +229,12 @@ def ai_lab_job_step(job_id: int, step_size: int = 2, authorization: str | None =
     require_super_admin(admin)
     try:
         with con() as c:
-            result = ai_lab_process_job_step(c, job_id, step_size=step_size, created_by=int(admin['id']))
+            if not _try_work_lock(c, 7701, job_id):
+                return {'ok': True, 'busy': True, 'done': False, 'job': ai_lab_get_job(c, job_id), 'message': '같은 AI LAB 기준 측정이 이미 처리 중입니다.'}
+            try:
+                result = ai_lab_process_job_step(c, job_id, step_size=step_size, created_by=int(admin['id']))
+            finally:
+                _release_work_lock(c, 7701, job_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
@@ -316,7 +321,12 @@ def ai_lab_job_compare_step(job_id: int, step_size: int = 2, authorization: str 
     require_super_admin(admin)
     try:
         with con() as c:
-            result = ai_lab_process_compare_step(c, job_id, step_size=step_size, created_by=int(admin['id']))
+            if not _try_work_lock(c, 7702, job_id):
+                return {'ok': True, 'busy': True, 'done': False, 'job': ai_lab_get_job(c, job_id), 'message': '같은 Candidate 비교 작업이 이미 처리 중입니다.'}
+            try:
+                result = ai_lab_process_compare_step(c, job_id, step_size=step_size, created_by=int(admin['id']))
+            finally:
+                _release_work_lock(c, 7702, job_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:

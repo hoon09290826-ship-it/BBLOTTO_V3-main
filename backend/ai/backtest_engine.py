@@ -12,7 +12,7 @@ from ..recommendation_engine import ENGINE_VERSION, build_backtest_cache, make_p
 BACKTEST_VERSION = "BBLOTTO_BACKTEST_RC6_D7_COLDSTART"
 DEFAULT_COMBO_COUNT = 10
 DEFAULT_MIN_HISTORY = 1
-MAX_STEP_SIZE = 5
+MAX_STEP_SIZE = 25
 
 
 def _now() -> str:
@@ -349,10 +349,19 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
             error = f"{exc.__class__.__name__}: {exc}"[:1000]
             failed += 1
         generation_ms = round((time.perf_counter() - started) * 1000, 2)
-        c.execute("DELETE FROM backtest_results WHERE run_id=? AND target_round=?", (int(run_id), int(target_round)))
         c.execute(
             "INSERT INTO backtest_results(run_id,target_round,history_from,history_to,history_count,mode,engine_version,seed,winning_numbers,bonus,recommended_numbers,details_json,best_match,best_rank,match_distribution,pool_match_count,pool_numbers,avg_combo_score,max_combo_score,generation_ms,status,error_message,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(run_id,target_round) DO UPDATE SET "
+            "history_from=excluded.history_from,history_to=excluded.history_to,history_count=excluded.history_count,"
+            "mode=excluded.mode,engine_version=excluded.engine_version,seed=excluded.seed,"
+            "winning_numbers=excluded.winning_numbers,bonus=excluded.bonus,"
+            "recommended_numbers=excluded.recommended_numbers,details_json=excluded.details_json,"
+            "best_match=excluded.best_match,best_rank=excluded.best_rank,match_distribution=excluded.match_distribution,"
+            "pool_match_count=excluded.pool_match_count,pool_numbers=excluded.pool_numbers,"
+            "avg_combo_score=excluded.avg_combo_score,max_combo_score=excluded.max_combo_score,"
+            "generation_ms=excluded.generation_ms,status=excluded.status,error_message=excluded.error_message,"
+            "created_at=excluded.created_at",
             (
                 int(run_id), int(target_round), int(history[0]["round"]) if history else 0, int(history[-1]["round"]) if history else 0, len(history), run["mode"], ENGINE_VERSION, seed,
                 json.dumps(target["numbers"], ensure_ascii=False), int(target.get("bonus") or 0),
@@ -364,10 +373,27 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
             ),
         )
         processed += 1
-        next_round = int(target_round) + 1
+        # 동시에 같은 회차가 처리돼도 실제 저장된 결과 행을 기준으로 진행률을
+        # 재계산합니다. 단순 +1 누적은 중복 요청에서 진행률을 부풀릴 수 있습니다.
+        totals = c.execute(
+            "SELECT COUNT(*) total,"
+            "SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) success,"
+            "SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed,"
+            "SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END) skipped,"
+            "MAX(target_round) max_round FROM backtest_results WHERE run_id=?",
+            (int(run_id),),
+        ).fetchone()
+        next_round = int((totals['max_round'] if totals else target_round) or target_round) + 1
         c.execute(
-            "UPDATE backtest_runs SET next_round=?,processed_rounds=processed_rounds+1,success_rounds=success_rounds+?,failed_rounds=failed_rounds+?,skipped_rounds=skipped_rounds+?,updated_at=?,error_message=? WHERE id=?",
-            (next_round, 1 if status == "ok" else 0, 1 if status == "failed" else 0, 1 if status == "skipped" else 0, _now(), error if status == "failed" else "", int(run_id)),
+            "UPDATE backtest_runs SET next_round=?,processed_rounds=?,success_rounds=?,failed_rounds=?,skipped_rounds=?,updated_at=?,error_message=? WHERE id=?",
+            (
+                next_round,
+                int((totals['total'] if totals else 0) or 0),
+                int((totals['success'] if totals else 0) or 0),
+                int((totals['failed'] if totals else 0) or 0),
+                int((totals['skipped'] if totals else 0) or 0),
+                _now(), error if status == "failed" else "", int(run_id),
+            ),
         )
         c.commit()
 

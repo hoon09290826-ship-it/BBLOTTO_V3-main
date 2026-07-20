@@ -18,6 +18,25 @@ class BacktestStartReq(BaseModel):
     min_history: int = 1
 
 
+def _try_work_lock(c, namespace: int, work_id: int) -> bool:
+    """Prevent two Railway workers/tabs from processing the same job."""
+    if DB_ENGINE != 'postgresql':
+        return True
+    row = c.execute(
+        'SELECT pg_try_advisory_lock(?,?) AS locked',
+        (int(namespace), int(work_id)),
+    ).fetchone()
+    try:
+        return bool(row['locked'])
+    except Exception:
+        return bool(row[0]) if row else False
+
+
+def _release_work_lock(c, namespace: int, work_id: int) -> None:
+    if DB_ENGINE == 'postgresql':
+        c.execute('SELECT pg_advisory_unlock(?,?)', (int(namespace), int(work_id)))
+
+
 @router.post('/api/backtest/runs')
 def backtest_start(req: BacktestStartReq, request: Request, authorization: str | None = Header(default=None)):
     admin = require_admin(authorization)
@@ -37,25 +56,30 @@ def backtest_step(run_id: int, step_size: int = 2, authorization: str | None = H
     require_super_admin(admin)
     try:
         with con() as c:
-            stable = ai_lab_load_stable_profile(c) or {}
-            profile_label = (
-                f"stable:{int(stable.get('version_id') or 0)}:"
-                f"{stable.get('profile_name') or 'legacy'}"
-            )
-            result = rc6_process_step(
-                c,
-                run_id,
-                step_size=step_size,
-                weight_profile=(stable.get('weights') or None),
-                profile_label=profile_label,
-            )
-            result['stable_profile'] = {
-                'version_id': int(stable.get('version_id') or 0),
-                'version_name': stable.get('version_name') or '',
-                'profile_id': int(stable.get('profile_id') or 0),
-                'profile_name': stable.get('profile_name') or '',
-                'applied': bool(stable.get('weights')),
-            }
+            if not _try_work_lock(c, 7501, run_id):
+                return {'ok': True, 'busy': True, 'done': False, 'run': rc6_get_run(c, run_id), 'message': '같은 백테스트 작업이 이미 처리 중입니다.'}
+            try:
+                stable = ai_lab_load_stable_profile(c) or {}
+                profile_label = (
+                    f"stable:{int(stable.get('version_id') or 0)}:"
+                    f"{stable.get('profile_name') or 'legacy'}"
+                )
+                result = rc6_process_step(
+                    c,
+                    run_id,
+                    step_size=step_size,
+                    weight_profile=(stable.get('weights') or None),
+                    profile_label=profile_label,
+                )
+                result['stable_profile'] = {
+                    'version_id': int(stable.get('version_id') or 0),
+                    'version_name': stable.get('version_name') or '',
+                    'profile_id': int(stable.get('profile_id') or 0),
+                    'profile_name': stable.get('profile_name') or '',
+                    'applied': bool(stable.get('weights')),
+                }
+            finally:
+                _release_work_lock(c, 7501, run_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     return {'ok': True, 'backtest_version': BACKTEST_VERSION, **result}
