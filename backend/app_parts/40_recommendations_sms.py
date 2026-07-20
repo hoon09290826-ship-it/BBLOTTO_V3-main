@@ -41,7 +41,12 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     details = rc37_enrich_details(combos, details)
     combos, details = rc38_portfolio_reorder(combos, details)
     details = rc37_enrich_details(combos, details)
-    analysis=clean_template_text(build_analysis_text(safe_round, st, safe_mode, req.fixed, excluded_value, details))
+    # 설명 엔진은 화면에 반환되는 최종 조합과 정확히 같은 번호를 사용해야 합니다.
+    # 재정렬 과정에서 detail 안의 이전 번호가 남아도 최종 combos를 기준으로 덮어씁니다.
+    for combo, detail in zip(combos, details):
+        if isinstance(detail, dict):
+            detail['numbers'] = list(combo)
+    analysis=clean_template_text(_stable13_build_analysis(safe_round, st, safe_mode, req.fixed, excluded_value, details, combos))
     sms=clean_template_text(build_sms(member_name, safe_round, combos, analysis, details))
     engine=_engine_summary(details, st)
     engine['phase']='RC6-D8.1-FULL-HISTORY-PORTFOLIO'
@@ -51,7 +56,7 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     engine['ai_lab_profile_name']=stable_lab.get('profile_name') or ''
     engine['ai_lab_profile_applied']=bool(stable_lab.get('weights'))
     engine['ai_lab_backtest_run_id']=int(stable_lab.get('backtest_run_id') or 0)
-    recommendation_analysis=clean_template_text(_stable13_build_recommendation(safe_round, details))
+    recommendation_analysis=analysis
     engine['member_grade']=member_grade
     engine['grade_strength']=rc45_grade_strength_text(member_grade)
     engine['engine_label']=_rc729_engine_name(member_grade)
@@ -260,4 +265,3 @@ def delete_sms_log(sms_id:int, request:Request, authorization: str|None = Header
         c.commit()
     log_action(admin,'DELETE_SMS_LOG',f"문구 이력 삭제 ID {sms_id} / {row['round_no'] or '-'}회 / {row['member_name'] or ''}",request)
     return {'ok':True,'deleted_id':sms_id}
-

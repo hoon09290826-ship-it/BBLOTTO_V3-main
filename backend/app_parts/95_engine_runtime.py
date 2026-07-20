@@ -2005,7 +2005,7 @@ def make_premium_combos(count=10, fixed='', excluded='', mode='balanced', member
 
 # ===================== RC11 EXPLAINABLE ANALYSIS OVERRIDE =====================
 try:
-    from .explanation_engine import build_evidence_analysis as _stable13_build_analysis, build_recommendation_analysis as _stable13_build_recommendation
+    from .professional_analysis_engine import build_evidence_analysis as _stable13_build_analysis, build_recommendation_analysis as _stable13_build_recommendation
 
     def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
         return _stable13_build_analysis(round_no, st, mode, fixed, excluded, details or [])

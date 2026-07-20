@@ -260,8 +260,8 @@ async function generate(){
     currentDetails=d.details||[];
     currentEngine=(d.engine&&typeof d.engine==='object')?d.engine:{};
     currentRound=d.round||d.round_no||body.round_no||'';
-    const fallback = buildFallbackAnalysis(currentCombos, latestStatsCache, body.mode);
-    currentAnalysis=normalizeText(d.analysis||d.ai_analysis||d.engine?.summary||fallback).trim() || fallback;
+    currentAnalysis=normalizeText(d.analysis||'').trim();
+    if(!currentAnalysis) throw new Error('번호별 선택 근거를 불러오지 못했습니다.');
     currentRecommendationAnalysis=normalizeText(d.recommendation_analysis||'').trim() || buildRecommendationAnalysis(currentCombos,currentDetails);
     currentSms=normalizeText(d.sms||'') || buildTemplateMessage(getSelectedMember(), currentRound, currentCombos, currentAnalysis);
     setText('roundLabel', currentRound ? `${currentRound}회차 추천번호 · 심층분석 완료` : '생성 완료');
@@ -356,5 +356,3 @@ async function copyAndSaveSmsLog(){
     alert(e.message || '문자 복사/저장 중 오류가 발생했습니다.');
   }
 }
-
-
