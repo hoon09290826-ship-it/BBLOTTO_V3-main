@@ -113,18 +113,9 @@ def ensure_ai_lab_tables(c: Any) -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_ai_versions_status ON ai_engine_versions(status,id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ai_jobs_status ON ai_learning_jobs(status,id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ai_notes_job ON ai_learning_notes(job_id,id)")
-    # Older deployments may already contain NULL values despite column defaults.
-    c.execute(
-        "UPDATE ai_learning_jobs SET "
-        "base_version_id=COALESCE(base_version_id,0), profile_id=COALESCE(profile_id,0), "
-        "target_rounds=COALESCE(target_rounds,0), processed_rounds=COALESCE(processed_rounds,0), "
-        "candidate_limit=COALESCE(candidate_limit,12), random_seed=COALESCE(random_seed,0), "
-        "best_candidate_version_id=COALESCE(best_candidate_version_id,0), "
-        "config_json=COALESCE(NULLIF(config_json,''),'{}'), result_json=COALESCE(NULLIF(result_json,''),'{}'), "
-        "error_message=COALESCE(error_message,''), created_by=COALESCE(created_by,0), "
-        "created_at=COALESCE(created_at,''), started_at=COALESCE(started_at,''), "
-        "completed_at=COALESCE(completed_at,''), updated_at=COALESCE(updated_at,'')"
-    )
+    # 행 기본값 보정은 읽기 변환(_job_dict)에서 처리합니다. 조회 API마다
+    # 전체 UPDATE를 실행하면 후보 비교 요청과 PostgreSQL 행 잠금이 교차해
+    # deadlock이 발생하므로 스키마 확인 단계에서는 데이터를 갱신하지 않습니다.
 
 
 def bootstrap(c: Any, *, engine_code_version: str, created_by: int = 0) -> Dict[str, Any]:
@@ -245,7 +236,7 @@ def get_overview(c: Any) -> Dict[str, Any]:
     for table, key in (("ai_engine_versions", "versions"), ("ai_weight_profiles", "profiles"), ("ai_learning_jobs", "jobs"), ("ai_learning_notes", "notes")):
         row = c.execute(f"SELECT COUNT(*) AS cnt FROM {table}").fetchone()
         counts[key] = int(row["cnt"] or 0)
-    active = c.execute("SELECT * FROM ai_learning_jobs WHERE status IN ('ready','running','paused','baseline_completed','candidates_ready') ORDER BY id DESC LIMIT 1").fetchone()
+    active = c.execute("SELECT * FROM ai_learning_jobs WHERE status IN ('ready','running','paused','baseline_completed','candidates_ready','candidates_testing') ORDER BY id DESC LIMIT 1").fetchone()
     return {"schema_version": AI_LAB_SCHEMA_VERSION, "stable": _version_dict(stable), "active_job": _job_dict(active), "counts": counts}
 
 
@@ -290,7 +281,7 @@ def create_learning_job(c: Any, *, range_type: str, candidate_limit: int, random
     range_type = str(range_type or "recent300").strip().lower()
     if range_type not in ALLOWED_JOB_RANGES:
         raise ValueError("학습 범위는 recent300, recent500, all 중 하나여야 합니다.")
-    running = c.execute("SELECT id FROM ai_learning_jobs WHERE status IN ('ready','running','paused','baseline_completed','candidates_ready') ORDER BY id DESC LIMIT 1").fetchone()
+    running = c.execute("SELECT id FROM ai_learning_jobs WHERE status IN ('ready','running','paused','baseline_completed','candidates_ready','candidates_testing') ORDER BY id DESC LIMIT 1").fetchone()
     if running:
         raise ValueError(f"완료되지 않은 학습 작업 #{running['id']}이 있습니다.")
     stable = c.execute("SELECT * FROM ai_engine_versions WHERE status='stable' ORDER BY id DESC LIMIT 1").fetchone()
@@ -324,7 +315,29 @@ def get_job(c: Any, job_id: int) -> Dict[str, Any]:
     row = c.execute("SELECT * FROM ai_learning_jobs WHERE id=?", (int(job_id),)).fetchone()
     if not row:
         raise KeyError("학습 작업을 찾을 수 없습니다.")
-    return _job_dict(row)
+    item = _job_dict(row)
+    if item.get("status") == "candidates_testing":
+        run_map = (item.get("result") or {}).get("candidate_backtest_runs") or {}
+        run_ids = [safe_int(value, 0, minimum=0) for value in run_map.values()]
+        run_ids = [value for value in run_ids if value > 0]
+        processed = total = completed = 0
+        for run_id in run_ids:
+            run = c.execute(
+                "SELECT status,processed_rounds,total_rounds FROM backtest_runs WHERE id=?",
+                (run_id,),
+            ).fetchone()
+            if not run:
+                continue
+            processed += safe_int(run["processed_rounds"], 0, minimum=0)
+            total += safe_int(run["total_rounds"], 0, minimum=0)
+            if str(run["status"] or "") == "completed":
+                completed += 1
+        item["candidate_processed_rounds"] = processed
+        item["candidate_total_rounds"] = total
+        item["candidate_completed_runs"] = completed
+        item["candidate_run_count"] = len(run_ids)
+        item["candidate_progress_percent"] = round(processed * 100 / total, 2) if total else 0.0
+    return item
 
 
 def list_jobs(c: Any, limit: int = 50) -> List[Dict[str, Any]]:

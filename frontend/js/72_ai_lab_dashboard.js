@@ -6,7 +6,7 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let activeJob=null,busy=false,stopRequested=false;
 const terminal=new Set(['completed','cancelled','failed','approved','candidates_ranked']);
-const statusLabel={ready:'준비',running:'실행 중',paused:'일시정지',baseline_completed:'기준 측정 완료',candidates_ready:'후보 생성 완료',candidates_ranked:'후보 비교 완료',approved:'승인 완료',completed:'완료',cancelled:'중단',failed:'실패'};
+const statusLabel={ready:'준비',running:'실행 중',paused:'일시정지',baseline_completed:'기준 측정 완료',candidates_ready:'후보 생성 완료',candidates_testing:'후보 비교 중',candidates_ranked:'후보 비교 완료',approved:'승인 완료',completed:'완료',cancelled:'중단',failed:'실패'};
 const validId=v=>Number.isInteger(Number(v))&&Number(v)>0;
 function normalizeJob(value){
  const source=value&&typeof value==='object'?(value.item||value.job||value.current_job||value.active_job||value):null;
@@ -32,18 +32,21 @@ function syncButtons(){
  setDisabled('aiLabResumeJob',busy||s!=='paused');
  setDisabled('aiLabCancelJob',busy||!isActive(activeJob));
  setDisabled('aiLabGenerateCandidates',busy||s!=='baseline_completed');
- setDisabled('aiLabCompareCandidates',busy||s!=='candidates_ready');
+ setDisabled('aiLabCompareCandidates',busy||!['candidates_ready','candidates_testing'].includes(s));
  setDisabled('aiLabRefresh',busy);
 }
 function setBusy(v){busy=!!v;syncButtons();}
 function progress(job){
  activeJob=normalizeJob(job);
  if(!activeJob){badge('대기');el('aiLabProgressText').textContent='실행 중인 연구가 없습니다.';el('aiLabProgressBar').style.width='0%';syncButtons();return;}
- const p=Math.max(0,Math.min(100,Number(activeJob.progress_percent||0)));
+ const comparing=String(activeJob.status||'')==='candidates_testing';
+ const p=Math.max(0,Math.min(100,Number(comparing?activeJob.candidate_progress_percent:(activeJob.progress_percent||0))));
  el('aiLabProgressBar').style.width=p+'%';
  const range=activeJob.range_type==='all'?'전체':activeJob.range_type==='recent500'?'최근 500회':'최근 300회';
  const err=activeJob.error_message?` · ${activeJob.error_message}`:'';
- el('aiLabProgressText').textContent=`작업 #${activeJob.id} · ${range} · ${activeJob.processed_rounds||0}/${activeJob.target_rounds||0}회 · ${statusLabel[activeJob.status]||activeJob.status}${err}`;
+ el('aiLabProgressText').textContent=comparing
+  ? `작업 #${activeJob.id} · Candidate ${activeJob.candidate_completed_runs||0}/${activeJob.candidate_run_count||0}개 완료 · 검증 ${activeJob.candidate_processed_rounds||0}/${activeJob.candidate_total_rounds||0}회 · 후보 비교 중${err}`
+  : `작업 #${activeJob.id} · ${range} · ${activeJob.processed_rounds||0}/${activeJob.target_rounds||0}회 · ${statusLabel[activeJob.status]||activeJob.status}${err}`;
  badge(statusLabel[activeJob.status]||activeJob.status||'대기');syncButtons();
 }
 function renderStable(item){if(!item||!Object.keys(item).length){el('aiLabStable').textContent='Stable 엔진 정보를 찾을 수 없습니다. 기존 기본 엔진으로 안전 동작합니다.';return;}const m=item.metrics||{};el('aiLabStable').innerHTML=`<div class="ai-lab-stable-card"><div><small>현재 운영 Stable</small><b>${esc(item.version_name||('#'+(item.version_id||item.id)))}</b><span>${esc(item.profile_name||'기본 프로필')}</span></div><div><small>엔진 코드</small><b>${esc(item.engine_code_version||'-')}</b><span>평균 최고일치 ${fmt(m.avg_best_match||m.score,2)}</span></div><div><small>상태</small><b class="positive">운영 중</b><span>관리자 승인 전 자동 변경 없음</span></div></div>`;}
@@ -73,7 +76,7 @@ async function pauseJob(){if(normalizeJob(activeJob)?.status!=='running')return 
 async function resumeJob(){if(normalizeJob(activeJob)?.status!=='paused')return alert('일시정지된 작업이 없습니다.');const jobId=currentJobId('이어 실행');if(!jobId)return;const d=await api(`/api/ai-lab/jobs/${jobId}/resume`,{method:'POST'});progress(normalizeJob(d));await runBaseline();}
 async function cancelJob(){const job=normalizeJob(activeJob);if(!isActive(job))return alert('중단할 진행 작업이 없습니다.');const jobId=currentJobId('중단');if(!jobId)return;if(!confirm(`작업 #${jobId}을 중단할까요? 운영 Stable 엔진은 변경되지 않습니다.`))return;stopRequested=true;const d=await api(`/api/ai-lab/jobs/${jobId}/cancel`,{method:'POST'});progress(normalizeJob(d));toast('작업을 중단했습니다.');await loadAll();}
 async function generateCandidates(){if(normalizeJob(activeJob)?.status!=='baseline_completed')return alert('기준 성능 측정을 먼저 완료하세요.');const jobId=currentJobId('후보 생성');if(!jobId)return;const d=await api(`/api/ai-lab/jobs/${jobId}/generate-candidates`,{method:'POST'});toast(`Candidate ${d.created_count||d.count||0}개를 생성했습니다.`);await loadAll();}
-async function compareCandidates(){if(normalizeJob(activeJob)?.status!=='candidates_ready')return alert('후보 생성을 먼저 완료하세요.');const jobId=currentJobId('후보 비교');if(!jobId)return;setBusy(true);try{let done=false;while(!done){const d=await api(`/api/ai-lab/jobs/${jobId}/compare-step?step_size=5`,{method:'POST'});progress(d.job||activeJob);done=!!d.done;await sleep(80);}await loadAll();}finally{setBusy(false);}}
+async function compareCandidates(){if(!['candidates_ready','candidates_testing'].includes(normalizeJob(activeJob)?.status))return alert('후보 생성을 먼저 완료하세요.');const jobId=currentJobId('후보 비교');if(!jobId)return;setBusy(true);try{let done=false;while(!done){const d=await api(`/api/ai-lab/jobs/${jobId}/compare-step?step_size=5`,{method:'POST'});const job=normalizeJob(d.job)||activeJob;if(d.backtest_run&&job){const r=d.backtest_run;job.candidate_processed_rounds=Number(job.candidate_processed_rounds||0)+Number(d.processed||0);job.candidate_total_rounds=Math.max(Number(job.candidate_total_rounds||0),Number(r.total_rounds||0)*Number(job.candidate_run_count||1));job.candidate_progress_percent=job.candidate_total_rounds?job.candidate_processed_rounds*100/job.candidate_total_rounds:0;}progress(job);done=!!d.done;await sleep(80);}await loadAll();}finally{setBusy(false);}}
 async function approve(versionId){const jobId=currentJobId('Stable 승인');if(!jobId)return;const reason=prompt('Stable 승인 사유를 입력하세요.','백테스트 1위 후보 관리자 승인');if(reason===null)return;await api('/api/ai-lab/approve',{method:'POST',body:{job_id:jobId,version_id:Number(versionId),reason}});toast('새 Stable 엔진을 승인했습니다.');await loadAll();}
 async function rollback(versionId){const reason=prompt('롤백 사유를 입력하세요.','이전 Stable 복원');if(reason===null)return;await api('/api/ai-lab/rollback',{method:'POST',body:{target_version_id:Number(versionId),reason}});toast('Stable 엔진을 롤백했습니다.');await loadAll();}
 function bind(){
