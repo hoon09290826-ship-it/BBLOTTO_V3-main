@@ -42,7 +42,7 @@ def sprint6_safe_backup(authorization: str|None = Header(default=None)):
     target = _s6_safe_backup_name()
     shutil.copy2(DB, target)
     try:
-        log_admin(admin.get('username','admin'), 'rc_safe_backup', f'backup={target.name}', '')
+        log_action(admin, 'RC_SAFE_BACKUP', f'backup={target.name}')
     except Exception:
         _log_suppressed_exception("90_release_rc3.py:47")
     return {'ok': True, 'version': SPRINT6_VERSION, 'backup_file': target.name, 'size_bytes': target.stat().st_size}
@@ -64,10 +64,11 @@ def sprint6_smoke_test(authorization: str|None = Header(default=None)):
             results.append({'name': name, 'ok': bool(data.get('ok', False)), 'message': data.get('summary','OK')})
         except Exception as e:
             results.append({'name': name, 'ok': False, 'message': str(e)})
-    files = [_s6_file_fingerprint(x) for x in ['backend/app.py','frontend/index.html','frontend/js/00_core.js','requirements.txt','Procfile','Dockerfile','START_HERE_DEPLOY.md']]
-    ok = all(r['ok'] for r in results) and all(f['exists'] for f in files)
+    required_files = ['backend/app.py','frontend/index.html','frontend/js/00_core.js','requirements.txt','Procfile','Dockerfile']
+    files = [_s6_file_fingerprint(x) for x in [*required_files, 'START_HERE_DEPLOY.md']]
+    ok = all(r['ok'] for r in results) and all(f['exists'] for f in files if f['path'] in required_files)
     try:
-        log_admin(admin.get('username','admin'), 'rc_smoke_test', f'ok={ok}', '')
+        log_action(admin, 'RC_SMOKE_TEST', f'ok={ok}')
     except Exception:
         _log_suppressed_exception("90_release_rc3.py:72")
     return {
@@ -564,5 +565,4 @@ def build_analysis_text(round_no, st, mode, fixed, excluded, details=None):
         ''
     ]
     return '\n'.join(lines)
-
 

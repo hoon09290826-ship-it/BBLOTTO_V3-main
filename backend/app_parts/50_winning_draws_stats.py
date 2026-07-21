@@ -75,7 +75,12 @@ def search_draw(round_no:int, authorization: str|None = Header(default=None)):
 def next_draw_round(authorization: str|None = Header(default=None)):
     require_admin(authorization)
     expected = expected_lotto_round()
-    check = resolve_draw_for_check(expected, allow_fetch=True)
+    # 화면 진입용 회차 조회는 DB만 확인해 즉시 응답합니다.
+    # 공식 사이트 조회는 /api/draws/check-auto 또는 fetch-official에서만 수행하여
+    # 외부 사이트 지연/차단이 추천 생성과 모바일 화면을 멈추지 않게 합니다.
+    check = resolve_draw_for_check(expected, allow_fetch=False)
+    if check.get('status') == 'missing':
+        check['message'] = f'{expected}회 당첨번호가 아직 저장되지 않았습니다. 당첨확인 화면에서 자동조회를 실행할 수 있습니다.'
     _, completed_round = _rc315_expected_round_and_completed()
     with con() as c:
         _rc315_clean_future_draws_in_conn(c)
@@ -515,4 +520,3 @@ def csv_response(filename, headers, rows):
     w=csv.writer(bio); w.writerow(headers); w.writerows(rows)
     data=bio.getvalue().encode('utf-8-sig')
     return StreamingResponse(io.BytesIO(data), media_type='text/csv; charset=utf-8', headers={'Content-Disposition':f'attachment; filename={filename}'})
-
