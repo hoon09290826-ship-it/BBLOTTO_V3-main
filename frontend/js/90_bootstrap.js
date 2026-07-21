@@ -7,7 +7,7 @@ function initMobileNavigation(){
     toggle.id='mobileMenuToggle';
     toggle.className='mobile-menu-toggle';
     toggle.type='button';
-    toggle.textContent='☰ 메뉴';
+    toggle.textContent='✕ 메뉴 닫기';
     aside.insertBefore(toggle, aside.querySelector('.nav'));
     toggle.addEventListener('click',()=>aside.classList.toggle('nav-open'));
   }
@@ -15,7 +15,7 @@ function initMobileNavigation(){
     const quick=document.createElement('nav');
     quick.className='mobile-quick-nav';
     quick.setAttribute('aria-label','모바일 바로가기');
-    quick.innerHTML='<button class="nav" data-tab="generator">추천번호</button><button class="nav" data-tab="members">회원관리</button><button type="button" data-mobile-menu="1">전체메뉴</button>';
+    quick.innerHTML='<strong>BBLOTTO</strong><button class="nav" data-tab="generator">추천</button><button class="nav" data-tab="members">회원</button><button type="button" data-mobile-menu="1">전체메뉴</button>';
     main.prepend(quick);
     quick.querySelector('[data-mobile-menu]')?.addEventListener('click',()=>aside?.classList.toggle('nav-open'));
   }
@@ -38,6 +38,18 @@ function initMobileNavigation(){
       const view=button.dataset.memberView;
       window.setMobileMemberView(view);
       members.scrollIntoView({behavior:'smooth',block:'start'});
+    });
+  }
+  const memberFilter=document.querySelector('#members .member-filter');
+  if(memberFilter && !memberFilter.querySelector('.mobile-filter-toggle')){
+    const filterToggle=document.createElement('button');
+    filterToggle.type='button';
+    filterToggle.className='mobile-filter-toggle';
+    filterToggle.textContent='필터';
+    memberFilter.append(filterToggle);
+    filterToggle.addEventListener('click',()=>{
+      const open=memberFilter.classList.toggle('filters-open');
+      filterToggle.textContent=open?'필터 닫기':'필터';
     });
   }
 }
