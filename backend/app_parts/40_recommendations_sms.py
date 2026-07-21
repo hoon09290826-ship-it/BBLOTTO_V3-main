@@ -46,6 +46,11 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     for combo, detail in zip(combos, details):
         if isinstance(detail, dict):
             detail['numbers'] = list(combo)
+            # 조합 카드와 하단 엔진 요약은 반드시 같은 회원 등급/엔진을 표시합니다.
+            detail['member_grade'] = member_grade
+            detail['grade'] = member_grade
+            detail['engine_label'] = _rc729_engine_name(member_grade)
+            detail['grade_strength'] = rc45_grade_strength_text(member_grade)
     analysis=clean_template_text(_stable13_build_analysis(safe_round, st, safe_mode, req.fixed, excluded_value, details, combos))
     sms=clean_template_text(build_sms(member_name, safe_round, combos, analysis, details))
     engine=_engine_summary(details, st)

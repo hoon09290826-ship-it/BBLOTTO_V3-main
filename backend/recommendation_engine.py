@@ -534,6 +534,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         },
     }
     grade_profile = grade_profiles.get(grade_key, grade_profiles["일반"])
+    engine_label = {"1등": "AI MASTER", "2등": "AI PREMIUM"}.get(grade_key, "AI BASIC")
     candidate_target = min(2500, max(int(grade_profile["candidate_floor"]), target * int(grade_profile["candidate_multiplier"])))
     pool: Dict[Tuple[int, ...], Tuple[float, Dict[str, Any]]] = {}
     attempts = 0
@@ -623,6 +624,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             "max_previous_overlap": int(portfolio_components["max_previous_overlap"]),
             "selection_rank": len(selected), "candidate_rank": candidate_rank.get(combo),
             "engine_version": ENGINE_VERSION, "engine": ENGINE_VERSION,
+            "member_grade": grade_key, "grade": grade_key, "engine_label": engine_label,
             "type": strategy, "strategy": strategy, "portfolio_type": strategy,
             "number_evidence": evidence, "alternative_candidate": alternative,
             "combo_evidence": _combo_evidence(combo, detail, cache, weights),
@@ -711,6 +713,9 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
             "selection_rank": len(selected),
             "engine_version": ENGINE_VERSION,
             "engine": ENGINE_VERSION,
+            "member_grade": grade_key,
+            "grade": grade_key,
+            "engine_label": engine_label,
             "type": "보완 균형형",
             "strategy": "보완 균형형",
             "portfolio_type": "보완 균형형",

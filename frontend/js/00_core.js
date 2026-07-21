@@ -207,12 +207,12 @@ function memberGradeLabel(v){
 function numberListText(arr){ return (arr||[]).map(x=>Array.isArray(x)?x.join(', '):String(x)).join('\n'); }
 function ballClass(n){ n=Number(n); if(n<=10)return'b1'; if(n<=20)return'b2'; if(n<=30)return'b3'; if(n<=40)return'b4'; return'b5'; }
 function gradeLabel(d){
-  const g = memberGradeLabel(d?.member_grade || d?.grade || '일반');
+  const g = memberGradeLabel(d?.member_grade || d?.grade || currentEngine?.member_grade || '일반');
   return g === '1등' ? '🥇 1등' : (g === '2등' ? '🥈 2등' : '⭐ 일반');
 }
 function engineLabel(d){
-  const g = memberGradeLabel(d?.member_grade || d?.grade || '일반');
-  return d?.engine_label || (g === '1등' ? 'AI MASTER' : (g === '2등' ? 'AI PREMIUM' : 'AI BASIC'));
+  const g = memberGradeLabel(d?.member_grade || d?.grade || currentEngine?.member_grade || '일반');
+  return d?.engine_label || currentEngine?.engine_label || (g === '1등' ? 'AI MASTER' : (g === '2등' ? 'AI PREMIUM' : 'AI BASIC'));
 }
 function displayScoreOf(d){ const v=d?.display_score ?? d?.score ?? d?.vip_score ?? d?.ai_score ?? 0; const n=Number(v); return Number.isFinite(n)?n:0; }
 function starLabel(d){ const s=displayScoreOf(d); return s>=95?'★★★★★':(s>=90?'★★★★☆':(s>=85?'★★★★':(s>=80?'★★★☆':'★★★'))); }
