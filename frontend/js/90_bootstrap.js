@@ -15,7 +15,7 @@ function initMobileNavigation(){
     const quick=document.createElement('nav');
     quick.className='mobile-quick-nav';
     quick.setAttribute('aria-label','모바일 바로가기');
-    quick.innerHTML='<strong>BBLOTTO</strong><button class="nav" data-tab="generator">추천</button><button class="nav" data-tab="members">회원</button><button type="button" data-mobile-menu="1">전체메뉴</button>';
+    quick.innerHTML='<strong>BBLOTTO</strong><button type="button" data-mobile-menu="1">전체메뉴</button>';
     main.prepend(quick);
     quick.querySelector('[data-mobile-menu]')?.addEventListener('click',()=>aside?.classList.toggle('nav-open'));
   }
@@ -52,6 +52,54 @@ function initMobileNavigation(){
       filterToggle.textContent=open?'필터 닫기':'필터';
     });
   }
+  if($('sendSmsBtn')) $('sendSmsBtn').textContent='회원 안내문구';
+
+  const optionBox=document.querySelector('#generator .option-box');
+  if(optionBox && !optionBox.querySelector('.mobile-generator-options')){
+    const optionGrid=document.createElement('div');
+    optionGrid.className='mobile-generator-options';
+    const controls=['genCount','genMode','fixed','exclude'].map(id=>$(id)).filter(Boolean);
+    if(controls.length){
+      const firstLabel=controls[0].previousElementSibling;
+      optionBox.insertBefore(optionGrid,firstLabel);
+      controls.forEach(control=>{
+        const label=control.previousElementSibling;
+        const cell=document.createElement('div');
+        cell.className='mobile-generator-option';
+        if(label?.tagName==='LABEL') cell.append(label);
+        cell.append(control);
+        optionGrid.append(cell);
+      });
+    }
+  }
+
+  const addSectionToggle=(target,label,open=false)=>{
+    if(!target || target.previousElementSibling?.classList.contains('mobile-section-toggle')) return;
+    const toggle=document.createElement('button');
+    toggle.type='button';
+    toggle.className='mobile-section-toggle';
+    toggle.dataset.sectionTarget=target.id || '';
+    const setOpen=(next)=>{
+      target.classList.toggle('mobile-section-open',next);
+      if(target.id==='memberMessagePanel') target.classList.toggle('mobile-open',next);
+      toggle.classList.toggle('open',next);
+      toggle.setAttribute('aria-expanded',String(next));
+      toggle.innerHTML=`<span>${label}</span><b>${next?'접기':'펼치기'} ${next?'⌃':'⌄'}</b>`;
+    };
+    toggle.addEventListener('click',()=>setOpen(!target.classList.contains('mobile-section-open')));
+    target.before(toggle);
+    setOpen(open);
+    target._setMobileSectionOpen=setOpen;
+  };
+  addSectionToggle($('memberMessagePanel'),'회원 안내문구',true);
+  addSectionToggle($('comboList'),'추천번호 조합',false);
+  addSectionToggle($('engineBox'),'AI 엔진 요약',false);
+  addSectionToggle(document.querySelector('#generator .analysis-wrap'),'이번 회차 핵심 분석',false);
+
+  window.openMobileRecommendationSection=(targetId)=>{
+    const target=$(targetId);
+    if(target && typeof target._setMobileSectionOpen==='function') target._setMobileSectionOpen(true);
+  };
 }
 function bind(){
   initMobileNavigation();

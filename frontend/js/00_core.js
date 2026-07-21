@@ -429,7 +429,8 @@ function buildTemplateMessage(member, round, combos, analysis){
 }
 function scrollToMessagePanel(){
   const panel = $('memberMessagePanel');
-  if(panel) panel.classList.add('mobile-open');
+  if(typeof window.openMobileRecommendationSection==='function') window.openMobileRecommendationSection('memberMessagePanel');
+  else if(panel) panel.classList.add('mobile-open','mobile-section-open');
   const target = panel || $('smsPreview') || $('comboList');
   if(target) setTimeout(()=>target.scrollIntoView({behavior:'smooth', block:'center'}), 150);
 }

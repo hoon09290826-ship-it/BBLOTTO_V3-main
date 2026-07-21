@@ -298,6 +298,7 @@ button{background:#151515;border:1px solid rgba(212,175,55,.35);border-radius:10
 #stableUiError.show{opacity:1;transform:translate(-50%,0);}
 button:not(:disabled){pointer-events:auto;cursor:pointer;}
 .mobile-menu-toggle,.mobile-quick-nav,.mobile-member-switch,.mobile-filter-toggle{display:none}
+.mobile-generator-options{display:contents}
 
 /* PATCH 053: mobile recommendation result-first layout */
 @media(max-width:900px){
@@ -441,9 +442,9 @@ button:not(:disabled){pointer-events:auto;cursor:pointer;}
   body.dashboardBody aside.nav-open .brand{display:block;grid-column:1;font-size:18px;padding:8px 4px}
   body.dashboardBody aside.nav-open .mobile-menu-toggle{display:block;grid-column:2;justify-self:end}
   body.dashboardBody aside.nav-open .nav,body.dashboardBody aside.nav-open .logout{display:block!important;width:100%;min-width:0;margin:0}
-  body.dashboardBody main>.mobile-quick-nav{position:sticky;top:0;z-index:1000;display:grid;grid-template-columns:auto 1fr 1fr auto;align-items:center;gap:5px;height:52px;padding:5px;background:#090806;border-bottom:1px solid rgba(212,175,55,.28)}
+  body.dashboardBody main>.mobile-quick-nav{position:sticky;top:0;z-index:1000;display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px;height:52px;padding:5px;background:#090806;border-bottom:1px solid rgba(212,175,55,.28)}
   body.dashboardBody .mobile-quick-nav strong{display:block;padding:0 5px;color:var(--gold2);font-size:13px;white-space:nowrap}
-  body.dashboardBody .mobile-quick-nav button{min-width:0;height:40px;padding:7px 6px;font-size:12px;white-space:nowrap}
+  body.dashboardBody .mobile-quick-nav button{min-width:78px;width:auto;height:40px;padding:7px 10px;font-size:12px;white-space:nowrap}
   body.dashboardBody main{padding:0 7px 12px}
   body.dashboardBody .panel.active{padding-top:7px}
   body.dashboardBody .dashboard-grid,body.dashboardBody .generator-grid,body.dashboardBody .member-layout,body.dashboardBody .admin-layout{gap:8px}
@@ -483,4 +484,27 @@ button:not(:disabled){pointer-events:auto;cursor:pointer;}
   body.dashboardBody .backtest-kpis .stat{padding:8px 4px;text-align:center}
   body.dashboardBody .backtest-kpis .stat b{font-size:16px}
   body.dashboardBody .backtest-kpis .stat span{font-size:9px}
+}
+
+/* PATCH 058: mobile recommendation accordion */
+.mobile-section-toggle{display:none}
+@media(max-width:900px){
+  body.dashboardBody #generator .result-box{display:block!important}
+  body.dashboardBody #generator .mobile-generator-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 8px;margin:4px 0 9px}
+  body.dashboardBody #generator .mobile-generator-option{min-width:0}
+  body.dashboardBody #generator .mobile-generator-option label{margin:3px 0;font-size:11px}
+  body.dashboardBody #generator .mobile-generator-option input,
+  body.dashboardBody #generator .mobile-generator-option select{width:100%;height:40px;min-width:0;padding:7px 9px;font-size:16px}
+  body.dashboardBody #generator .mobile-section-toggle{display:flex;width:100%;align-items:center;justify-content:space-between;gap:8px;margin:7px 0;padding:11px 12px;border-radius:10px;background:rgba(212,175,55,.08);color:var(--gold2);text-align:left}
+  body.dashboardBody #generator .mobile-section-toggle span{font-size:14px;font-weight:900}
+  body.dashboardBody #generator .mobile-section-toggle b{font-size:10px;color:#d8c98d;white-space:nowrap}
+  body.dashboardBody #generator .mobile-section-toggle.open{background:linear-gradient(135deg,rgba(212,175,55,.24),rgba(0,0,0,.2));border-color:rgba(246,216,120,.55)}
+  body.dashboardBody #memberMessagePanel:not(.mobile-section-open),
+  body.dashboardBody #comboList:not(.mobile-section-open),
+  body.dashboardBody #engineBox:not(.mobile-section-open),
+  body.dashboardBody #generator .analysis-wrap:not(.mobile-section-open){display:none!important}
+  body.dashboardBody #memberMessagePanel.mobile-section-open,
+  body.dashboardBody #comboList.mobile-section-open,
+  body.dashboardBody #engineBox.mobile-section-open,
+  body.dashboardBody #generator .analysis-wrap.mobile-section-open{display:block!important}
 }
