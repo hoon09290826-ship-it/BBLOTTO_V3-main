@@ -300,13 +300,92 @@ button:not(:disabled){pointer-events:auto;cursor:pointer;}
 
 /* PATCH 053: mobile recommendation result-first layout */
 @media(max-width:900px){
+  body.dashboardBody .app{display:block}
+  body.dashboardBody aside{position:sticky;top:0;z-index:1000;height:auto;display:flex;align-items:center;gap:6px;overflow-x:auto;padding:7px 8px;white-space:nowrap;scrollbar-width:none}
+  body.dashboardBody aside::-webkit-scrollbar{display:none}
+  body.dashboardBody .brand{flex:0 0 auto;font-size:18px;line-height:1;margin:0 7px 0 0;text-align:left;letter-spacing:0}
+  body.dashboardBody .brand:before,body.dashboardBody .brand small{display:none}
+  body.dashboardBody .brand br{display:none}
+  body.dashboardBody .brand span{font-size:11px;margin-left:4px}
+  body.dashboardBody aside .nav,body.dashboardBody aside .logout{flex:0 0 auto;width:auto;margin:0;padding:9px 10px;font-size:12px;border-color:rgba(212,175,55,.2)}
+  body.dashboardBody aside .logout{margin-left:4px}
+  body.dashboardBody main{padding:10px}
+  body.dashboardBody main>header{display:flex;align-items:center;padding:6px 2px 10px;margin-bottom:10px}
+  body.dashboardBody main>header .eyebrow{display:none}
+  body.dashboardBody main>header h2{font-size:20px}
+  body.dashboardBody main>header .user{padding:7px 10px;font-size:12px}
   #generator .option-box{max-height:none;overflow:visible}
   #memberMessagePanel:not(.mobile-open){display:none}
   #memberMessagePanel.mobile-open{display:block}
   #memberMessagePanel textarea{height:auto!important;max-height:42vh;overflow:auto}
-  #generator .result-box{scroll-margin-top:10px}
+  #generator .result-box{scroll-margin-top:62px;display:flex;flex-direction:column;padding:14px}
+  #generator .result-head{order:1}
+  #generator #engineBox{order:2}
+  #generator .analysis-wrap{order:3;margin-top:12px}
+  #generator #comboList{order:4}
+  #generator .combo-card-grid{display:flex;grid-template-columns:none;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 1px 9px;scrollbar-width:thin}
+  #generator .combo-card,#generator .v40-card{flex:0 0 min(82vw,310px);min-height:0;padding:10px;scroll-snap-align:start}
+  #generator .v40-card .idx{display:flex;align-items:flex-start;gap:6px}
+  #generator .v40-card .idx em{margin-top:0;font-size:10px;padding:3px 6px;white-space:normal;text-align:right}
+  #generator .nums{flex-wrap:nowrap;gap:4px;margin:8px 0}
+  #generator .ball{width:31px;height:31px;font-size:13px;flex:0 0 31px}
+  #generator .combo-meta{margin-top:7px;gap:4px}
+  #generator .combo-meta span{font-size:10px;padding:4px 6px}
+  #generator .chip-row{display:none}
+  #generator .engine-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  #generator .engine-grid span{padding:8px 5px}
+  #generator .engine-grid b{font-size:15px}
+  #generator .engine-grid small{font-size:10px}
+  #generator .analysis{padding:11px;font-size:13px;line-height:1.55}
+  #generator .analysis-list{padding-left:17px}
+  #generator .analysis-list li{margin:5px 0;line-height:1.55}
   #generator .quick-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
   #generator .quick-actions button{width:100%}
+
+  /* 전체 관리 화면 공통 압축: 긴 1열 나열 대신 2열/가로 넘김을 사용합니다. */
+  body.dashboardBody .box{padding:13px;border-radius:14px}
+  body.dashboardBody h3{font-size:17px;margin-bottom:10px}
+  body.dashboardBody .hint{font-size:12px;line-height:1.45}
+  body.dashboardBody label{font-size:12px;margin:8px 0 4px}
+  body.dashboardBody input,body.dashboardBody select,body.dashboardBody textarea{padding:9px 10px;font-size:16px;border-radius:9px}
+  body.dashboardBody textarea{min-height:100px;max-height:42vh;overflow:auto}
+  body.dashboardBody button{padding:8px 10px;font-size:13px;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+  body.dashboardBody .bigbtn{padding:11px;font-size:14px}
+  body.dashboardBody .cards,body.dashboardBody .cards.compact,
+  body.dashboardBody .rc44-kpi,body.dashboardBody .stats-kpi,
+  body.dashboardBody .win-summary-top,body.dashboardBody .win-rank-strip,
+  body.dashboardBody .member-analysis-kpis{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px}
+  body.dashboardBody .stat{min-height:0;padding:11px;border-radius:12px}
+  body.dashboardBody .stat b{font-size:20px}
+  body.dashboardBody .stat span{font-size:11px}
+  body.dashboardBody .member-filter{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px}
+  body.dashboardBody .member-filter>input:first-child{grid-column:1/-1}
+  body.dashboardBody .member-row,body.dashboardBody .admin-row,body.dashboardBody .log-row,body.dashboardBody .draw-row{padding:9px 0;gap:6px;font-size:12px}
+  body.dashboardBody .detail-profile-grid,body.dashboardBody .rc43-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px}
+  body.dashboardBody .detail-profile-grid .main-profile{grid-column:1/-1}
+  body.dashboardBody .detail-card{padding:11px;border-radius:12px}
+  body.dashboardBody .detail-card b{font-size:19px}
+  body.dashboardBody .admin-final-tabs{display:flex;flex-direction:row;overflow-x:auto;gap:6px;scrollbar-width:none}
+  body.dashboardBody .admin-final-tabs::-webkit-scrollbar{display:none}
+  body.dashboardBody .admin-tab-btn{flex:0 0 auto;padding:9px 13px}
+  body.dashboardBody .admin-final-card{min-height:0}
+  body.dashboardBody .admin-card{padding:10px;gap:8px}
+  body.dashboardBody .admin-actions{display:flex;flex-wrap:nowrap;overflow-x:auto;justify-content:flex-start}
+  body.dashboardBody .admin-actions button{flex:0 0 auto;min-width:64px}
+  body.dashboardBody .simple-log-row,body.dashboardBody .simple-backup-row{padding:9px 10px;margin:6px 0}
+  body.dashboardBody .ai-lab-stable-card{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  body.dashboardBody .ai-lab-stable-card>div{padding:10px}
+  body.dashboardBody .ai-lab-kpis{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  body.dashboardBody .ai-lab-actions,body.dashboardBody .btnrow.wrap{display:flex;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}
+  body.dashboardBody .ai-lab-actions button,body.dashboardBody .btnrow.wrap button{flex:0 0 auto}
+  body.dashboardBody .backtest-kpis{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  body.dashboardBody .backtest-report-grid,body.dashboardBody .ai-lab-grid{gap:10px}
+  body.dashboardBody .table,body.dashboardBody table{font-size:11px}
+  body.dashboardBody .table th,body.dashboardBody .table td{padding:7px 5px}
+  body.dashboardBody .pager{gap:6px;margin-top:8px}
+  body.dashboardBody .quick-result-modal{max-height:94vh;padding:12px}
+  body.dashboardBody .quick-result-grid{gap:8px}
+  body.dashboardBody .quick-result-grid section{padding:11px}
 }
 
 /* RC6-B full-history backtest report */
