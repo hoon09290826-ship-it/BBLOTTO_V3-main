@@ -428,8 +428,17 @@ function buildTemplateMessage(member, round, combos, analysis){
     .replaceAll('{AI점수}', String(getBestAiScore())));
 }
 function scrollToMessagePanel(){
-  const target = $('memberMessagePanel') || $('smsPreview') || $('comboList');
+  const panel = $('memberMessagePanel');
+  if(panel) panel.classList.add('mobile-open');
+  const target = panel || $('smsPreview') || $('comboList');
   if(target) setTimeout(()=>target.scrollIntoView({behavior:'smooth', block:'center'}), 150);
+}
+
+function scrollToRecommendationResults(){
+  const panel = $('memberMessagePanel');
+  if(panel) panel.classList.remove('mobile-open');
+  const target = document.querySelector('#generator .result-box') || $('comboList');
+  if(target) setTimeout(()=>target.scrollIntoView({behavior:'smooth', block:'start'}), 120);
 }
 
 

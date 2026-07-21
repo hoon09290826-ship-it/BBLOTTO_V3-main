@@ -274,7 +274,8 @@ async function generate(){
     loadStats(0).catch(e=>console.warn('생성 후 통계 갱신 실패', e));
     if(selectedMemberId && $('genMember')) $('genMember').value=selectedMemberId;
     refreshSmsPreview();
-    if(!quickMemberGenerationMode) scrollToMessagePanel();
+    // 모바일에서는 긴 문자 편집창을 접고 생성 결과부터 바로 확인합니다.
+    if(!quickMemberGenerationMode) scrollToRecommendationResults();
     saveWorkspaceState();
     toast('추천번호 미리보기 생성 완료 · 저장 버튼을 눌러야 당첨확인 대상에 등록됩니다.');
   }catch(e){
