@@ -1,5 +1,48 @@
 /* BBLOTTO V3 frontend split: js/90_bootstrap.js | original lines 2351-2711 */
+function initMobileNavigation(){
+  const aside=document.querySelector('aside');
+  const main=document.querySelector('main');
+  if(aside && !$('mobileMenuToggle')){
+    const toggle=document.createElement('button');
+    toggle.id='mobileMenuToggle';
+    toggle.className='mobile-menu-toggle';
+    toggle.type='button';
+    toggle.textContent='☰ 메뉴';
+    aside.insertBefore(toggle, aside.querySelector('.nav'));
+    toggle.addEventListener('click',()=>aside.classList.toggle('nav-open'));
+  }
+  if(main && !document.querySelector('.mobile-quick-nav')){
+    const quick=document.createElement('nav');
+    quick.className='mobile-quick-nav';
+    quick.setAttribute('aria-label','모바일 바로가기');
+    quick.innerHTML='<button class="nav" data-tab="generator">추천번호</button><button class="nav" data-tab="members">회원관리</button><button type="button" data-mobile-menu="1">전체메뉴</button>';
+    main.prepend(quick);
+    quick.querySelector('[data-mobile-menu]')?.addEventListener('click',()=>aside?.classList.toggle('nav-open'));
+  }
+  const members=$('members');
+  if(members && !members.querySelector('.mobile-member-switch')){
+    const controls=document.createElement('div');
+    controls.className='mobile-member-switch';
+    controls.innerHTML='<button type="button" data-member-view="list" class="active">회원 목록</button><button type="button" data-member-view="form">회원 등록/수정</button>';
+    members.prepend(controls);
+    members.classList.add('member-mobile-list');
+    window.setMobileMemberView=(view='list')=>{
+      const button=controls.querySelector(`[data-member-view="${view}"]`);
+      members.classList.toggle('member-mobile-list',view==='list');
+      members.classList.toggle('member-mobile-form',view==='form');
+      controls.querySelectorAll('button').forEach(item=>item.classList.toggle('active',item===button));
+    };
+    controls.addEventListener('click',(event)=>{
+      const button=event.target.closest('[data-member-view]');
+      if(!button) return;
+      const view=button.dataset.memberView;
+      window.setMobileMemberView(view);
+      members.scrollIntoView({behavior:'smooth',block:'start'});
+    });
+  }
+}
 function bind(){
+  initMobileNavigation();
   // RC11.7: 왼쪽 메뉴는 한 개의 위임 라우터로만 처리합니다.
   // 기존 브라우저 캐시나 일부 초기 로딩 실패가 있어도 메뉴 전환은 항상 동작합니다.
   if(!window.__bbPrimaryNavBound){
@@ -11,6 +54,8 @@ function bind(){
       e.stopPropagation();
       const tab=String(btn.dataset.tab||'dashboard');
       openPanel(tab, btn.textContent.trim());
+      if(tab==='members' && typeof window.setMobileMemberView==='function') window.setMobileMemberView('list');
+      document.querySelector('aside')?.classList.remove('nav-open');
       const loaders={
         dashboard:()=>loadDashboard(),
         members:()=>loadMembers(),

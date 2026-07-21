@@ -260,6 +260,10 @@ window.selectMember=function(id){
   if($('genMember')) $('genMember').value=id;
   setGenCountValue(getMemberPreferredCount(m));
   refreshSmsPreview();
+  if(matchMedia('(max-width:900px)').matches && typeof window.setMobileMemberView==='function'){
+    window.setMobileMemberView('form');
+    $('members')?.scrollIntoView({behavior:'smooth',block:'start'});
+  }
   toast(`${m.name} 회원을 선택했습니다.`);
 };
 
@@ -313,4 +317,3 @@ function showMemberQuickResult(member, combos, analysis, copied=true, saved=fals
   modal.addEventListener('click',e=>{ if(e.target===modal) closeMemberQuickResult(); });
   document.body.appendChild(modal);
 }
-

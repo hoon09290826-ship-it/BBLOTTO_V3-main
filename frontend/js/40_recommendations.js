@@ -311,7 +311,9 @@ async function addMember(){
     setValue('mCreatedBy',''); setValue('mCreatedAt',''); setValue('mContractPeriod','12'); setValue('mContractEndAt','');
     setValue('mGrade','일반'); setValue('mStatus','활성'); setValue('mPriority','보통'); setValue('mPreferredCount','10'); setValue('mSource',''); refreshMemberAdminSelect();
   }
-  await loadDashboard(); toast('회원 정보가 저장되었습니다.');
+  await loadDashboard();
+  if(matchMedia('(max-width:900px)').matches && typeof window.setMobileMemberView==='function') window.setMobileMemberView('list');
+  toast('회원 정보가 저장되었습니다.');
 }
 function autoTemplate(){
   setValue('template', getDefaultTemplate());
