@@ -1,4 +1,5 @@
 from .ai.ai_lab_activation import load_stable_profile as ai_lab_load_stable_profile
+from .recommendation_verification import build_generation_verification
 # Extracted from legacy backend/app.py lines 2873-3075.
 @router.post('/api/generate')
 def generate(req:GenerateReq, request:Request, authorization: str|None = Header(default=None)):
@@ -69,10 +70,21 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     engine['rc38_report']=rc38_generation_report(combos, details, safe_round, safe_mode)
     engine['top3']=rc37_top3(combos, details)
     engine['quality_guide']=f'{member_grade} 관리 기준 · 1회차부터 최신 회차까지의 기록과 실제 조합 특징을 반영한 설명형 추천'
+    verification=build_generation_verification(
+        round_no=safe_round, mode=safe_mode, member_grade=member_grade,
+        fixed=req.fixed, excluded=excluded_value, combos=combos, details=details,
+        stats=st, engine=engine,
+    )
+    engine['verification']=verification
+    engine['verification_id']=verification['verification_id']
+    for index, detail in enumerate(details):
+        if isinstance(detail, dict):
+            detail['verification_id']=verification['verification_id']
+            detail['verification_combo_index']=index + 1
     # RC8.18: 번호 생성 단계에서는 DB에 저장하지 않습니다.
     # 추천번호 저장/보낸문자 저장을 명시적으로 실행한 경우에만 recommendations에 등록됩니다.
     log_action(admin,'GENERATE_PREVIEW_RC8_18',f'{safe_round}회차 {len(combos)}조합 미리보기 생성 · 저장 안 함',request)
-    return {'id':None,'saved':False,'round_no':safe_round,'round':safe_round,'sets':combos,'combos':combos,'details':details,'top3':engine.get('top3',[]),'engine':engine,'analysis':analysis,'recommendation_analysis':recommendation_analysis,'sms':sms,'member_id':member_id,'member_name':member_name,'member_notice':sms,'quality_guide':engine.get('quality_guide')}
+    return {'id':None,'saved':False,'round_no':safe_round,'round':safe_round,'sets':combos,'combos':combos,'details':details,'top3':engine.get('top3',[]),'engine':engine,'verification':verification,'analysis':analysis,'recommendation_analysis':recommendation_analysis,'sms':sms,'member_id':member_id,'member_name':member_name,'member_notice':sms,'quality_guide':engine.get('quality_guide')}
 
 
 @router.post('/api/recommendations/save')
@@ -150,6 +162,7 @@ def recommendation_detail(rec_id:int, authorization: str|None = Header(default=N
         d['details']=[combo_detail(c,st) for c in d['numbers']]
     d['details']=rc37_enrich_details(d.get('numbers') or [], d.get('details') or [])
     d['top3']=rc37_top3(d.get('numbers') or [], d.get('details') or [])
+    d['verification']=(d.get('engine') or {}).get('verification') or {}
     return d
 
 

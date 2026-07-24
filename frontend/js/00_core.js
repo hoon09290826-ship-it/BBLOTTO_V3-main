@@ -600,6 +600,44 @@ function renderRecommendationAnalysis(text){
   an.innerHTML=`<ul class="analysis-list">${lines.map(l=>`<li>${esc(l)}</li>`).join('')}</ul>`;
 }
 
+function renderVerificationProof(proof){
+  if(!proof || typeof proof!=='object' || !proof.verification_id) return '';
+  const validations=proof.validations||{}, checks=Object.entries(validations);
+  const passedCount=checks.filter(([,value])=>value===true).length;
+  const scope=proof.data_scope||{};
+  const range=Array.isArray(scope.round_range)?scope.round_range.join('~'):'-';
+  const labels={
+    six_unique_numbers:'조합당 6개 고유번호',
+    numbers_in_range:'번호 범위 1~45',
+    no_duplicate_combinations:'중복 조합 없음',
+    fixed_numbers_included:'고정수 반영',
+    excluded_numbers_absent:'제외수 미포함',
+    details_match_final_numbers:'화면 번호·분석 일치',
+    six_number_evidence_rows:'번호별 계산근거 6개',
+    full_history_confirmed:'전체 이력 분석',
+    history_has_no_missing_rounds:'누락 회차 없음'
+  };
+  const lab=proof.validation_linkage||{};
+  const comboRows=(proof.combo_proofs||[]).map(row=>{
+    const evidence=(row.number_evidence||[])
+      .map(item=>`${item.number}(${item.role||'-'}·${item.selection_score??'-'})`)
+      .join(' / ');
+    return `<li><b>${row.index}조합 · ${esc((row.numbers||[]).join(', '))}</b><small>후보 ${esc(row.candidate_rank??'-')}위 → 최종 ${esc(row.selection_rank??row.index)}위 · ${esc(row.strategy||'-')} · 원점수 ${esc(row.raw_score??'-')} · 표시점수 ${esc(row.display_score??'-')}</small><small>${esc(evidence)}</small></li>`;
+  }).join('');
+  return `<details class="verification-proof">
+    <summary><span>분석 검증 ${proof.passed?'통과':'확인 필요'}</span><em>ID ${esc(proof.short_id||String(proof.verification_id).slice(0,12))} · ${passedCount}/${checks.length}</em></summary>
+    <div class="verification-body">
+      <div class="verification-scope"><span><b>${esc(range)}</b><small>분석 회차</small></span><span><b>${esc(scope.draw_count??'-')}</b><small>학습 회차</small></span><span><b>${esc(scope.candidate_count??'-')}</b><small>검토 후보</small></span><span><b>${esc(proof.selected_count??'-')}</b><small>최종 선별</small></span></div>
+      <p>생성 번호와 계산 근거를 SHA-256 검증 ID로 묶었습니다. 번호·근거·엔진·데이터 범위 중 하나라도 달라지면 ID도 달라집니다.</p>
+      <p>AI LAB 연결: ${lab.ai_lab_profile_applied?'Stable 가중치 적용':'운영 Stable 기준'} · 버전 ${esc(lab.ai_lab_stable_version_id||'-')} · 백테스트 작업 ${esc(lab.ai_lab_backtest_run_id||'-')} · ${esc(lab.method||'')}</p>
+      <div class="verification-checks">${checks.map(([key,value])=>`<span class="${value?'ok':'bad'}">${value?'✓':'!'} ${esc(labels[key]||key)}</span>`).join('')}</div>
+      <div class="verification-factors">${(proof.factor_groups||[]).map(x=>`<span>${esc(x)}</span>`).join('')}</div>
+      <details class="verification-combos"><summary>조합별 실제 계산근거 보기</summary><ol>${comboRows}</ol></details>
+      <code>${esc(proof.verification_id)}</code>
+    </div>
+  </details>`;
+}
+
 function renderEngine(engine, details=[]){
   const eb=$('engineBox'); if(!eb) return;
   const scores = details.map(d=>displayScoreOf(d)).filter(Boolean);
@@ -621,5 +659,5 @@ function renderEngine(engine, details=[]){
     <span><b>${top || '-'}</b><small>최고 점수</small></span>
     <span><b>${min || '-'}</b><small>최저 점수</small></span>
     <span><b>${filter || '-'}</b><small>최종 선별</small></span>
-  </div>`;
+  </div>${renderVerificationProof(engine?.verification)}`;
 }
