@@ -18,9 +18,18 @@ class BacktestStartReq(BaseModel):
     min_history: int = 1
 
 
+_LOCAL_WORK_LOCK_GUARD = globals().get('_LOCAL_WORK_LOCK_GUARD') or threading.Lock()
+_LOCAL_ACTIVE_WORK = globals().get('_LOCAL_ACTIVE_WORK') or set()
+
+
 def _try_work_lock(c, namespace: int, work_id: int) -> bool:
     """Prevent two Railway workers/tabs from processing the same job."""
     if DB_ENGINE != 'postgresql':
+        key = (int(namespace), int(work_id))
+        with _LOCAL_WORK_LOCK_GUARD:
+            if key in _LOCAL_ACTIVE_WORK:
+                return False
+            _LOCAL_ACTIVE_WORK.add(key)
         return True
     row = c.execute(
         'SELECT pg_try_advisory_lock(?,?) AS locked',
@@ -35,6 +44,9 @@ def _try_work_lock(c, namespace: int, work_id: int) -> bool:
 def _release_work_lock(c, namespace: int, work_id: int) -> None:
     if DB_ENGINE == 'postgresql':
         c.execute('SELECT pg_advisory_unlock(?,?)', (int(namespace), int(work_id)))
+    else:
+        with _LOCAL_WORK_LOCK_GUARD:
+            _LOCAL_ACTIVE_WORK.discard((int(namespace), int(work_id)))
 
 
 @router.post('/api/backtest/runs')

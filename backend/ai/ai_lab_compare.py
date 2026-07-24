@@ -6,9 +6,41 @@ from .ai_lab_core import _json, _loads, _now, ensure_ai_lab_tables, get_job
 from .ai_lab_candidates import list_job_candidates
 from .backtest_engine import create_run, get_run, get_summary, load_draws, process_step
 
-COMPARE_VERSION = "RC6_D9_TWO_STAGE_SHARED_CACHE_COMPARE"
+COMPARE_VERSION = "RC6_D10_BACKGROUND_PERSISTENT_CACHE_COMPARE"
 SCREENING_ROUNDS = 300
 PRECISION_CANDIDATES = 3
+
+
+def _run_is_compatible(
+    run: Dict[str, Any],
+    *,
+    range_type: str,
+    validation_profile: str,
+    profile_fingerprint: str,
+    wanted_total: int,
+) -> bool:
+    """Reuse only results produced under exactly the same validation contract."""
+    return bool(
+        run
+        and run.get("status") == "completed"
+        and int(run.get("total_rounds") or 0) >= int(wanted_total)
+        and str(run.get("validation_profile") or "") == validation_profile
+        and str(run.get("profile_fingerprint") or "") == profile_fingerprint
+        and str(run.get("seed_scheme") or "") == "portable_v1"
+        and (
+            range_type != "recent300"
+            or int(run.get("total_rounds") or 0) == SCREENING_ROUNDS
+        )
+    )
+
+
+def _candidate_fingerprint(candidate: Dict[str, Any], version_id: int) -> str:
+    from .backtest_engine import _profile_fingerprint
+
+    return _profile_fingerprint(
+        candidate.get("weights") or {},
+        f"candidate:{version_id}",
+    )
 
 
 def _configure_run(c: Any, run_id: int, range_type: str) -> Dict[str, Any]:
@@ -134,8 +166,15 @@ def initialize_candidate_runs(
     for version_id in sorted(candidates):
         old_run_id = old_map.get(version_id)
         old_run = get_run(c, old_run_id) if old_run_id else {}
-        # 이미 전체 검증이 끝난 후보는 버리지 않고 1차 결과로 재사용합니다.
-        if old_run and old_run.get("status") == "completed":
+        fingerprint = _candidate_fingerprint(candidates[version_id], version_id)
+        # 엔진·프로필·범위·시드 방식이 모두 같은 결과만 재사용합니다.
+        if _run_is_compatible(
+            old_run,
+            range_type="recent300",
+            validation_profile="screening",
+            profile_fingerprint=fingerprint,
+            wanted_total=SCREENING_ROUNDS,
+        ):
             screening_map[version_id] = int(old_run_id)
         else:
             run = _new_run(
@@ -208,10 +247,13 @@ def _start_precision_stage(
             if original_range == "recent500"
             else len(load_draws(c))
         )
-        if (
-            legacy_run
-            and legacy_run.get("status") == "completed"
-            and int(legacy_run.get("total_rounds") or 0) >= wanted_total
+        fingerprint = _candidate_fingerprint(candidates[version_id], version_id)
+        if _run_is_compatible(
+            legacy_run,
+            range_type=original_range,
+            validation_profile="precision",
+            profile_fingerprint=fingerprint,
+            wanted_total=wanted_total,
         ):
             precision_map[version_id] = int(legacy_run_id)
         else:

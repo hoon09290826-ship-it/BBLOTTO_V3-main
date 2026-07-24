@@ -40,6 +40,145 @@ from .ai.ai_lab_activation import (
     rollback_stable as ai_lab_rollback_stable,
 )
 
+_AI_LAB_BACKGROUND_WAKE = threading.Event()
+_AI_LAB_BACKGROUND_STOP = threading.Event()
+_AI_LAB_BACKGROUND_THREAD = None
+_AI_LAB_BACKGROUND_GUARD = threading.Lock()
+
+
+def _ai_lab_background_config(c, job_id: int, phase: str = '', stop_reason: str = ''):
+    row = c.execute(
+        'SELECT config_json FROM ai_learning_jobs WHERE id=?',
+        (int(job_id),),
+    ).fetchone()
+    if not row:
+        raise KeyError('학습 작업을 찾을 수 없습니다.')
+    try:
+        config = json.loads(row['config_json'] or '{}')
+    except Exception:
+        config = {}
+    config['background_phase'] = str(phase or '')
+    config['background_enabled'] = bool(phase)
+    if phase:
+        config['last_background_phase'] = str(phase)
+    config['background_stop_reason'] = '' if phase else str(stop_reason or '')
+    config['background_updated_at'] = now()
+    c.execute(
+        'UPDATE ai_learning_jobs SET config_json=?,updated_at=? WHERE id=?',
+        (json.dumps(config, ensure_ascii=False), now(), int(job_id)),
+    )
+    c.commit()
+    return config
+
+
+def _ai_lab_background_job(c):
+    rows = c.execute(
+        "SELECT id,status,created_by,config_json FROM ai_learning_jobs "
+        "WHERE status IN ('ready','running','candidates_ready','candidates_testing') "
+        "ORDER BY id"
+    ).fetchall()
+    for row in rows:
+        try:
+            config = json.loads(row['config_json'] or '{}')
+        except Exception:
+            config = {}
+        phase = str(config.get('background_phase') or '')
+        if phase in {'baseline', 'compare'}:
+            return {
+                'id': int(row['id']),
+                'status': str(row['status'] or ''),
+                'created_by': int(row['created_by'] or 0),
+                'phase': phase,
+            }
+    return None
+
+
+def _ai_lab_background_loop():
+    while not _AI_LAB_BACKGROUND_STOP.is_set():
+        work = None
+        try:
+            with con() as c:
+                work = _ai_lab_background_job(c)
+            if not work:
+                _AI_LAB_BACKGROUND_WAKE.wait(2.0)
+                _AI_LAB_BACKGROUND_WAKE.clear()
+                continue
+            namespace = 7701 if work['phase'] == 'baseline' else 7702
+            with con() as c:
+                if not _try_work_lock(c, namespace, work['id']):
+                    _AI_LAB_BACKGROUND_WAKE.wait(.35)
+                    _AI_LAB_BACKGROUND_WAKE.clear()
+                    continue
+                try:
+                    if work['phase'] == 'baseline':
+                        result = ai_lab_process_job_step(
+                            c,
+                            work['id'],
+                            step_size=25,
+                            created_by=work['created_by'],
+                        )
+                    else:
+                        result = ai_lab_process_compare_step(
+                            c,
+                            work['id'],
+                            step_size=25,
+                            created_by=work['created_by'],
+                        )
+                    fresh = ai_lab_get_job(c, work['id'])
+                    fresh_config = fresh.get('config') or {}
+                    if (
+                        not fresh_config.get('background_enabled')
+                        and not result.get('done')
+                    ):
+                        stop_reason = str(
+                            fresh_config.get('background_stop_reason') or 'pause'
+                        )
+                        if stop_reason == 'cancel':
+                            ai_lab_cancel_job(
+                                c,
+                                work['id'],
+                                created_by=work['created_by'],
+                            )
+                        else:
+                            ai_lab_pause_job(
+                                c,
+                                work['id'],
+                                created_by=work['created_by'],
+                            )
+                    if result.get('done') or result.get('paused'):
+                        _ai_lab_background_config(c, work['id'], '')
+                finally:
+                    _release_work_lock(c, namespace, work['id'])
+        except Exception as exc:
+            logger.exception('AI LAB background worker failed: work=%s', work)
+            if work:
+                try:
+                    with con() as c:
+                        _ai_lab_background_config(c, work['id'], '')
+                        c.execute(
+                            "UPDATE ai_learning_jobs SET status='failed',error_message=?,"
+                            "completed_at=?,updated_at=? WHERE id=?",
+                            (f'{exc.__class__.__name__}: {exc}'[:1000], now(), now(), work['id']),
+                        )
+                        c.commit()
+                except Exception:
+                    logger.exception('AI LAB background failure state save failed')
+        _AI_LAB_BACKGROUND_WAKE.wait(.05)
+        _AI_LAB_BACKGROUND_WAKE.clear()
+
+
+def _ensure_ai_lab_background_worker():
+    global _AI_LAB_BACKGROUND_THREAD
+    with _AI_LAB_BACKGROUND_GUARD:
+        if _AI_LAB_BACKGROUND_THREAD and _AI_LAB_BACKGROUND_THREAD.is_alive():
+            return
+        _AI_LAB_BACKGROUND_THREAD = threading.Thread(
+            target=_ai_lab_background_loop,
+            name='bblotto-ai-lab-worker',
+            daemon=True,
+        )
+        _AI_LAB_BACKGROUND_THREAD.start()
+
 
 
 
@@ -223,6 +362,40 @@ def ai_lab_job(job_id: int, authorization: str | None = Header(default=None)):
     return {'ok': True, 'item': item}
 
 
+@router.post('/api/ai-lab/jobs/{job_id}/background-start')
+def ai_lab_job_background_start(job_id: int, phase: str = 'baseline', authorization: str | None = Header(default=None)):
+    admin = require_admin(authorization)
+    require_super_admin(admin)
+    phase = str(phase or 'baseline').strip().lower()
+    if phase not in {'baseline', 'compare'}:
+        raise HTTPException(400, '백그라운드 단계는 baseline 또는 compare여야 합니다.')
+    try:
+        with con() as c:
+            item = ai_lab_get_job(c, job_id)
+            allowed = (
+                {'ready', 'running'}
+                if phase == 'baseline'
+                else {'candidates_ready', 'candidates_testing'}
+            )
+            if str(item.get('status') or '') not in allowed:
+                raise ValueError('현재 작업 상태에서는 해당 백그라운드 실행을 시작할 수 없습니다.')
+            _ai_lab_background_config(c, job_id, phase)
+            item = ai_lab_get_job(c, job_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    _ensure_ai_lab_background_worker()
+    _AI_LAB_BACKGROUND_WAKE.set()
+    return {
+        'ok': True,
+        'background': True,
+        'phase': phase,
+        'item': item,
+        'message': '브라우저를 닫아도 서버에서 계속 처리합니다.',
+    }
+
+
 @router.post('/api/ai-lab/jobs/{job_id}/step')
 def ai_lab_job_step(job_id: int, step_size: int = 2, authorization: str | None = Header(default=None)):
     admin = require_admin(authorization)
@@ -251,7 +424,9 @@ def ai_lab_job_pause(job_id: int, request: Request, authorization: str | None = 
     require_super_admin(admin)
     try:
         with con() as c:
+            _ai_lab_background_config(c, job_id, '', 'pause')
             item = ai_lab_pause_job(c, job_id, created_by=int(admin['id']))
+            item = ai_lab_get_job(c, job_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     log_action(admin, 'AI_LAB_JOB_PAUSE', f"AI LAB 학습 작업 #{job_id} 일시정지", request)
@@ -265,9 +440,15 @@ def ai_lab_job_resume(job_id: int, request: Request, authorization: str | None =
     try:
         with con() as c:
             item = ai_lab_resume_job(c, job_id, created_by=int(admin['id']))
+            previous_phase = str((item.get('config') or {}).get('last_background_phase') or 'baseline')
+            phase = 'compare' if item.get('status') == 'candidates_testing' else previous_phase
+            _ai_lab_background_config(c, job_id, phase)
+            item = ai_lab_get_job(c, job_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     log_action(admin, 'AI_LAB_JOB_RESUME', f"AI LAB 학습 작업 #{job_id} 재개", request)
+    _ensure_ai_lab_background_worker()
+    _AI_LAB_BACKGROUND_WAKE.set()
     return {'ok': True, 'item': item}
 
 
@@ -277,7 +458,9 @@ def ai_lab_job_cancel(job_id: int, request: Request, authorization: str | None =
     require_super_admin(admin)
     try:
         with con() as c:
+            _ai_lab_background_config(c, job_id, '', 'cancel')
             item = ai_lab_cancel_job(c, job_id, created_by=int(admin['id']))
+            item = ai_lab_get_job(c, job_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     log_action(admin, 'AI_LAB_JOB_CANCEL', f"AI LAB 학습 작업 #{job_id} 중단", request)
@@ -416,5 +599,6 @@ try:
         ai_lab_bootstrap(_ai_lab_conn, engine_code_version=ENGINE_VERSION, created_by=0)
         ensure_activation_tables(_ai_lab_conn)
         _ai_lab_conn.commit()
+    _ensure_ai_lab_background_worker()
 except Exception:
     logger.exception('RC6-D1 AI LAB schema initialization failed')

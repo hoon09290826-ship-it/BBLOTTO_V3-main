@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import math
 import time
@@ -11,6 +12,8 @@ from ..recommendation_ensemble import ENSEMBLE_VERSION, select_ensemble_portfoli
 from ..recommendation_engine import ENGINE_VERSION, build_backtest_cache, make_premium_combos
 
 BACKTEST_VERSION = "BBLOTTO_BACKTEST_RC6_D8_ENSEMBLE_WALKFORWARD"
+EVALUATION_CACHE_VERSION = "RC6_D10_PORTABLE_EVALUATION_CACHE"
+MAX_EVALUATION_CACHE_ROWS = 10000
 DEFAULT_COMBO_COUNT = 10
 DEFAULT_MIN_HISTORY = 1
 MAX_STEP_SIZE = 25
@@ -139,6 +142,21 @@ def ensure_backtest_tables(c: Any) -> None:
         "status": "TEXT DEFAULT 'ok'", "error_message": "TEXT DEFAULT ''",
         "created_at": "TEXT DEFAULT ''",
     })
+    _ensure_columns(c, "backtest_runs", {
+        "validation_profile": "TEXT DEFAULT ''",
+        "profile_fingerprint": "TEXT DEFAULT ''",
+        "seed_scheme": "TEXT DEFAULT ''",
+    })
+    c.execute(
+        "CREATE TABLE IF NOT EXISTS backtest_evaluation_cache("
+        "cache_key TEXT PRIMARY KEY, cache_version TEXT DEFAULT '', "
+        "engine_version TEXT DEFAULT '', backtest_version TEXT DEFAULT '', "
+        "validation_profile TEXT DEFAULT '', profile_fingerprint TEXT DEFAULT '', "
+        "target_round INTEGER DEFAULT 0, history_fingerprint TEXT DEFAULT '', "
+        "result_json TEXT DEFAULT '{}', generation_ms REAL DEFAULT 0, "
+        "hit_count INTEGER DEFAULT 0, created_at TEXT DEFAULT '', last_used_at TEXT DEFAULT ''"
+        ")"
+    )
     c.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_backtest_results_run_round "
         "ON backtest_results(run_id,target_round)"
@@ -146,6 +164,10 @@ def ensure_backtest_tables(c: Any) -> None:
     c.execute(
         "CREATE INDEX IF NOT EXISTS idx_backtest_results_round "
         "ON backtest_results(target_round)"
+    )
+    c.execute(
+        "CREATE INDEX IF NOT EXISTS idx_backtest_eval_cache_used "
+        "ON backtest_evaluation_cache(last_used_at)"
     )
     c.execute(
         "UPDATE backtest_runs SET "
@@ -158,6 +180,85 @@ def ensure_backtest_tables(c: Any) -> None:
         "created_at=COALESCE(created_at,''), started_at=COALESCE(started_at,''), "
         "completed_at=COALESCE(completed_at,''), updated_at=COALESCE(updated_at,''), error_message=COALESCE(error_message,'')"
     )
+
+
+def _profile_fingerprint(
+    weight_profile: Optional[Dict[str, Any]],
+    profile_label: str,
+) -> str:
+    canonical = json.dumps(
+        {"weights": weight_profile or {}},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _history_fingerprints(
+    ordered: Sequence[Dict[str, Any]],
+) -> Dict[int, str]:
+    """Fingerprint only information available before each target round."""
+    digest = hashlib.sha256()
+    result: Dict[int, str] = {}
+    for draw in ordered:
+        round_no = int(draw.get("round") or 0)
+        result[round_no] = digest.hexdigest()
+        digest.update(
+            json.dumps(
+                {
+                    "round": round_no,
+                    "numbers": list(draw.get("numbers") or []),
+                    "bonus": int(draw.get("bonus") or 0),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+    return result
+
+
+def _evaluation_cache_key(
+    *,
+    target_round: int,
+    history_fingerprint: str,
+    mode: str,
+    combo_count: int,
+    validation_profile: str,
+    profile_fingerprint: str,
+) -> str:
+    canonical = "|".join([
+        EVALUATION_CACHE_VERSION,
+        ENGINE_VERSION,
+        BACKTEST_VERSION,
+        ENSEMBLE_VERSION,
+        str(int(target_round)),
+        history_fingerprint,
+        str(mode or "balanced"),
+        str(int(combo_count)),
+        str(validation_profile or "full"),
+        profile_fingerprint,
+    ])
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _prune_evaluation_cache(c: Any) -> None:
+    total = int(c.execute("SELECT COUNT(*) FROM backtest_evaluation_cache").fetchone()[0])
+    overflow = total - MAX_EVALUATION_CACHE_ROWS
+    if overflow <= 0:
+        return
+    rows = c.execute(
+        "SELECT cache_key FROM backtest_evaluation_cache "
+        "ORDER BY last_used_at,created_at LIMIT ?",
+        (min(5000, overflow),),
+    ).fetchall()
+    for row in rows:
+        c.execute(
+            "DELETE FROM backtest_evaluation_cache WHERE cache_key=?",
+            (row["cache_key"],),
+        )
+    c.commit()
 
 
 def load_draws(c: Any) -> List[Dict[str, Any]]:
@@ -300,6 +401,29 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
     by_round = {int(d["round"]): d for d in draws}
     ordered = sorted(draws, key=lambda d: int(d["round"]))
     positions = {int(d["round"]): i for i, d in enumerate(ordered)}
+    history_fingerprints = _history_fingerprints(ordered)
+    profile_fingerprint = _profile_fingerprint(weight_profile, profile_label)
+    existing_result_count = int(
+        c.execute(
+            "SELECT COUNT(*) FROM backtest_results WHERE run_id=?",
+            (int(run_id),),
+        ).fetchone()[0]
+    )
+    seed_scheme = str(run.get("seed_scheme") or "").strip()
+    if not seed_scheme:
+        seed_scheme = "legacy_run_v1" if existing_result_count else "portable_v1"
+        c.execute(
+            "UPDATE backtest_runs SET validation_profile=?,profile_fingerprint=?,"
+            "seed_scheme=?,updated_at=? WHERE id=?",
+            (
+                str(validation_profile or "full"),
+                profile_fingerprint,
+                seed_scheme,
+                _now(),
+                int(run_id),
+            ),
+        )
+        c.commit()
     target_rounds = [r for r in sorted(by_round) if int(r) >= _safe_int(run.get("next_round"), _safe_int(run.get("start_round"), 1)) and int(r) <= _safe_int(run.get("end_round"), _safe_int(run.get("start_round"), 1))][:step_size]
     if not target_rounds:
         c.execute("UPDATE backtest_runs SET status='completed',completed_at=?,updated_at=? WHERE id=?", (_now(), _now(), int(run_id)))
@@ -319,7 +443,12 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
         error = ""
         result: Dict[str, Any] = {}
         started = time.perf_counter()
-        seed = f"{BACKTEST_VERSION}|run:{run_id}|round:{target_round}|mode:{run['mode']}|count:{run['combo_count']}|profile:{profile_label}"
+        seed_identity = (
+            f"run:{run_id}|profile:{profile_label}"
+            if seed_scheme == "legacy_run_v1"
+            else f"profile:{profile_fingerprint}"
+        )
+        seed = f"{BACKTEST_VERSION}|{seed_identity}|round:{target_round}|mode:{run['mode']}|count:{run['combo_count']}"
         try:
             is_cold_start = len(history) == 0
             if not is_cold_start and len(history) < _safe_int(run.get("min_history"), DEFAULT_MIN_HISTORY, minimum=1):
@@ -330,43 +459,120 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
                 # Empty history is allowed only for the first target round.
                 # build_backtest_cache([]) returns neutral/equal historical
                 # features, and the deterministic seed contains no winning data.
-                cache = build_backtest_cache(history)
                 requested_count = _safe_int(
                     run.get("combo_count"),
                     DEFAULT_COMBO_COUNT,
                     minimum=1,
                     maximum=50,
                 )
-                ensemble_pool_count = min(
-                    50,
-                    max(
-                        requested_count,
-                        min(requested_count * 2, requested_count + 12),
-                    ),
+                history_fingerprint = history_fingerprints.get(
+                    int(target_round),
+                    hashlib.sha256(b"").hexdigest(),
                 )
-                combos, details, stats = make_premium_combos(
-                    ensemble_pool_count,
-                    mode=run["mode"],
-                    member_grade="일반",
-                    cache_override=cache,
-                    deterministic_seed=seed,
-                    lab_weight_profile=weight_profile,
+                evaluation_key = _evaluation_cache_key(
+                    target_round=int(target_round),
+                    history_fingerprint=history_fingerprint,
+                    mode=str(run["mode"]),
+                    combo_count=requested_count,
                     validation_profile=validation_profile,
+                    profile_fingerprint=profile_fingerprint,
                 )
-                combos, details, ensemble_report = select_ensemble_portfolio(
-                    combos,
-                    details,
-                    requested_count,
-                )
-                stats["ensemble_report"] = ensemble_report
-                stats["ensemble_version"] = ENSEMBLE_VERSION
-                stats["requested_count"] = requested_count
-                stats["validation_profile"] = validation_profile
-                result = _evaluate(combos, details, target)
-                result["recommended_numbers"] = combos
-                result["details"] = details
-                result["engine_stats"] = stats
-                result["validation_mode"] = "cold_start" if is_cold_start else "walk_forward"
+                cached_row = c.execute(
+                    "SELECT result_json FROM backtest_evaluation_cache "
+                    "WHERE cache_key=? AND cache_version=?",
+                    (evaluation_key, EVALUATION_CACHE_VERSION),
+                ).fetchone()
+                cached_result = {}
+                if cached_row:
+                    try:
+                        cached_result = json.loads(cached_row["result_json"] or "{}")
+                    except Exception:
+                        cached_result = {}
+                if cached_result:
+                    result = cached_result
+                    stats = dict(result.get("engine_stats") or {})
+                    stats["persistent_cache_hit"] = True
+                    stats["evaluation_cache_version"] = EVALUATION_CACHE_VERSION
+                    result["engine_stats"] = stats
+                    c.execute(
+                        "UPDATE backtest_evaluation_cache SET hit_count=hit_count+1,"
+                        "last_used_at=? WHERE cache_key=?",
+                        (_now(), evaluation_key),
+                    )
+                else:
+                    cache = build_backtest_cache(history)
+                    ensemble_pool_count = min(
+                        50,
+                        max(
+                            requested_count,
+                            min(requested_count * 2, requested_count + 12),
+                        ),
+                    )
+                    combos, details, stats = make_premium_combos(
+                        ensemble_pool_count,
+                        mode=run["mode"],
+                        member_grade="일반",
+                        cache_override=cache,
+                        deterministic_seed=seed,
+                        lab_weight_profile=weight_profile,
+                        validation_profile=validation_profile,
+                    )
+                    combos, details, ensemble_report = select_ensemble_portfolio(
+                        combos,
+                        details,
+                        requested_count,
+                    )
+                    stats["ensemble_report"] = ensemble_report
+                    stats["ensemble_version"] = ENSEMBLE_VERSION
+                    stats["requested_count"] = requested_count
+                    stats["validation_profile"] = validation_profile
+                    stats["profile_fingerprint"] = profile_fingerprint
+                    stats["profile_label"] = str(profile_label or "")
+                    stats["persistent_cache_hit"] = False
+                    stats["evaluation_cache_version"] = EVALUATION_CACHE_VERSION
+                    result = _evaluate(combos, details, target)
+                    result["recommended_numbers"] = combos
+                    result["details"] = details
+                    result["engine_stats"] = stats
+                    result["validation_mode"] = "cold_start" if is_cold_start else "walk_forward"
+                    cached_payload = {
+                        "recommended_numbers": result.get("recommended_numbers", []),
+                        "combo_results": result.get("combo_results", []),
+                        "best_match": result.get("best_match", 0),
+                        "best_rank": result.get("best_rank", "낙첨"),
+                        "match_distribution": result.get("match_distribution", {}),
+                        "pool_match_count": result.get("pool_match_count", 0),
+                        "pool_numbers": result.get("pool_numbers", []),
+                        "avg_combo_score": result.get("avg_combo_score", 0),
+                        "max_combo_score": result.get("max_combo_score", 0),
+                        "engine_stats": result.get("engine_stats", {}),
+                        "validation_mode": result.get("validation_mode", "walk_forward"),
+                    }
+                    c.execute(
+                        "INSERT INTO backtest_evaluation_cache("
+                        "cache_key,cache_version,engine_version,backtest_version,"
+                        "validation_profile,profile_fingerprint,target_round,"
+                        "history_fingerprint,result_json,generation_ms,hit_count,"
+                        "created_at,last_used_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                        "ON CONFLICT(cache_key) DO UPDATE SET "
+                        "result_json=excluded.result_json,generation_ms=excluded.generation_ms,"
+                        "last_used_at=excluded.last_used_at",
+                        (
+                            evaluation_key,
+                            EVALUATION_CACHE_VERSION,
+                            ENGINE_VERSION,
+                            BACKTEST_VERSION,
+                            str(validation_profile or "full"),
+                            profile_fingerprint,
+                            int(target_round),
+                            history_fingerprint,
+                            json.dumps(cached_payload, ensure_ascii=False),
+                            0,
+                            0,
+                            _now(),
+                            _now(),
+                        ),
+                    )
                 success += 1
         except Exception as exc:
             status = "failed"
@@ -427,6 +633,7 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
         c.execute("UPDATE backtest_runs SET status='completed',completed_at=?,updated_at=? WHERE id=?", (_now(), _now(), int(run_id)))
         c.commit()
         updated = get_run(c, run_id)
+    _prune_evaluation_cache(c)
     return {"run": updated, "processed": processed, "success": success, "failed": failed, "skipped": skipped, "done": updated["status"] == "completed"}
 
 

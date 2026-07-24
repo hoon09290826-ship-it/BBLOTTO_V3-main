@@ -23,7 +23,7 @@ from .backtest_engine import (
     process_step,
 )
 
-RUNNER_VERSION = "RC6_D7_COLDSTART_RUNNER"
+RUNNER_VERSION = "RC6_D10_BACKGROUND_RESUMABLE_RUNNER"
 _TERMINAL = {"completed", "failed", "cancelled"}
 
 
