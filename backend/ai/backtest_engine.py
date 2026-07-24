@@ -417,7 +417,8 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
                 _now(), error if status == "failed" else "", int(run_id),
             ),
         )
-        c.commit()
+        if processed % 5 == 0 or target_round == target_rounds[-1]:
+            c.commit()
 
     updated = get_run(c, run_id)
     if _safe_int(updated.get("next_round"), 1) > _safe_int(updated.get("end_round"), 0):

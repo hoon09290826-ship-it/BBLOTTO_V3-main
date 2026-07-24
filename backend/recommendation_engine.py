@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import time
 import urllib.request
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
@@ -32,6 +32,7 @@ ENGINE_VERSION = "BBLOTTO_AI_RECOMMENDATION_RC7_E5_1_VERIFIED"
 _ensure_ai_scheduler_started()
 _CACHE_LOCK = threading.RLock()
 _MEMORY_CACHE: Dict[str, Any] = {}
+_BACKTEST_CACHE_LRU: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
 _SYNC_LOCK = threading.Lock()
 
 
@@ -791,7 +792,28 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
 
 def build_backtest_cache(draws: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Public, side-effect free cache builder for walk-forward backtests."""
-    return _build_cache(draws_override=draws)
+    ordered = sorted(
+        (dict(draw) for draw in (draws or [])),
+        key=lambda draw: int(draw.get("round") or 0),
+    )
+    key = (
+        len(ordered),
+        int(ordered[0].get("round") or 0) if ordered else 0,
+        int(ordered[-1].get("round") or 0) if ordered else 0,
+        tuple(ordered[-1].get("numbers") or []) if ordered else (),
+    )
+    with _CACHE_LOCK:
+        cached = _BACKTEST_CACHE_LRU.get(key)
+        if cached is not None:
+            _BACKTEST_CACHE_LRU.move_to_end(key)
+            return cached
+    built = _build_cache(draws_override=ordered)
+    with _CACHE_LOCK:
+        _BACKTEST_CACHE_LRU[key] = built
+        _BACKTEST_CACHE_LRU.move_to_end(key)
+        while len(_BACKTEST_CACHE_LRU) > 96:
+            _BACKTEST_CACHE_LRU.popitem(last=False)
+    return built
 
 
 def _official_fetch(round_no: int, timeout: int = 4) -> Optional[Dict[str, Any]]:

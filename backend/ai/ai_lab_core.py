@@ -317,7 +317,19 @@ def get_job(c: Any, job_id: int) -> Dict[str, Any]:
         raise KeyError("학습 작업을 찾을 수 없습니다.")
     item = _job_dict(row)
     if item.get("status") == "candidates_testing":
-        run_map = (item.get("result") or {}).get("candidate_backtest_runs") or {}
+        compare_result = item.get("result") or {}
+        run_map = compare_result.get("candidate_backtest_runs") or {}
+        item["compare_stage"] = compare_result.get("compare_stage") or "screening"
+        item["screening_rounds"] = safe_int(
+            compare_result.get("screening_rounds"),
+            300,
+            minimum=1,
+        )
+        item["precision_candidate_count"] = safe_int(
+            compare_result.get("precision_candidate_count"),
+            3,
+            minimum=1,
+        )
         run_ids = [safe_int(value, 0, minimum=0) for value in run_map.values()]
         run_ids = [value for value in run_ids if value > 0]
         processed = total = completed = 0
