@@ -263,6 +263,9 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
             "backtest_run": run,
         }
     except Exception as exc:
+        # PostgreSQL marks the whole transaction as aborted after one SQL
+        # failure. Roll it back before recording the real root error.
+        c.rollback()
         c.execute(
             "UPDATE ai_learning_jobs SET status='failed',error_message=?,completed_at=?,updated_at=? WHERE id=?",
             (str(exc)[:1000], _now(), _now(), safe_int(job_id, 0, minimum=1)),
@@ -301,9 +304,13 @@ def pause_job(c: Any, job_id: int, *, created_by: int = 0) -> Dict[str, Any]:
 
 def resume_job(c: Any, job_id: int, *, created_by: int = 0) -> Dict[str, Any]:
     job = get_job(c, job_id)
-    if job["status"] != "paused":
+    if job["status"] not in {"paused", "failed"}:
         return job
-    c.execute("UPDATE ai_learning_jobs SET status='ready',updated_at=? WHERE id=?", (_now(), safe_int(job_id, 0, minimum=1)))
+    c.execute(
+        "UPDATE ai_learning_jobs SET status='ready',error_message='',completed_at='',"
+        "updated_at=? WHERE id=?",
+        (_now(), safe_int(job_id, 0, minimum=1)),
+    )
     _write_note(
         c,
         job_id=safe_int(job_id, 0, minimum=1),

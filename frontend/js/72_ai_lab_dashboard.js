@@ -29,7 +29,7 @@ function syncButtons(){
  setDisabled('aiLabCreateJob',busy||isActive(activeJob));
  setDisabled('aiLabRunBaseline',busy||!['ready','running'].includes(s));
  setDisabled('aiLabPauseJob',busy||s!=='running');
- setDisabled('aiLabResumeJob',busy||s!=='paused');
+ setDisabled('aiLabResumeJob',busy||!['paused','failed'].includes(s));
  setDisabled('aiLabCancelJob',busy||!isActive(activeJob));
  setDisabled('aiLabGenerateCandidates',busy||s!=='baseline_completed');
  setDisabled('aiLabCompareCandidates',busy||!['candidates_ready','candidates_testing'].includes(s));
@@ -89,7 +89,7 @@ async function watchBackground(jobId,phase){
 }
 async function runBaseline(){const jobId=currentJobId('기준 성능 측정');if(!jobId)return;setBusy(true);try{const d=await api(`/api/ai-lab/jobs/${jobId}/background-start?phase=baseline`,{method:'POST'});progress(normalizeJob(d)||activeJob);toast('서버 백그라운드 실행을 시작했습니다. 화면을 닫아도 계속 진행됩니다.');}finally{setBusy(false);}await watchBackground(jobId,'baseline');await loadAll();}
 async function pauseJob(){if(normalizeJob(activeJob)?.status!=='running')return alert('실행 중인 작업만 일시정지할 수 있습니다.');const jobId=currentJobId('일시정지');if(!jobId)return;stopRequested=true;const d=await api(`/api/ai-lab/jobs/${jobId}/pause`,{method:'POST'});progress(normalizeJob(d));toast('일시정지했습니다.');}
-async function resumeJob(){if(normalizeJob(activeJob)?.status!=='paused')return alert('일시정지된 작업이 없습니다.');const jobId=currentJobId('이어 실행');if(!jobId)return;const d=await api(`/api/ai-lab/jobs/${jobId}/resume`,{method:'POST'});const job=normalizeJob(d);progress(job);toast('서버에서 이어 실행합니다.');await watchBackground(jobId,job?.config?.background_phase||'baseline');await loadAll();}
+async function resumeJob(){if(!['paused','failed'].includes(normalizeJob(activeJob)?.status))return alert('이어 실행할 작업이 없습니다.');const jobId=currentJobId('이어 실행');if(!jobId)return;const d=await api(`/api/ai-lab/jobs/${jobId}/resume`,{method:'POST'});const job=normalizeJob(d);progress(job);toast('실패 지점을 정리하고 서버에서 이어 실행합니다.');await watchBackground(jobId,job?.config?.background_phase||'baseline');await loadAll();}
 async function cancelJob(){const job=normalizeJob(activeJob);if(!isActive(job))return alert('중단할 진행 작업이 없습니다.');const jobId=currentJobId('중단');if(!jobId)return;if(!confirm(`작업 #${jobId}을 중단할까요? 운영 Stable 엔진은 변경되지 않습니다.`))return;stopRequested=true;const d=await api(`/api/ai-lab/jobs/${jobId}/cancel`,{method:'POST'});progress(normalizeJob(d));toast('작업을 중단했습니다.');await loadAll();}
 async function generateCandidates(){if(normalizeJob(activeJob)?.status!=='baseline_completed')return alert('기준 성능 측정을 먼저 완료하세요.');const jobId=currentJobId('후보 생성');if(!jobId)return;const d=await api(`/api/ai-lab/jobs/${jobId}/generate-candidates`,{method:'POST'});toast(`Candidate ${d.created_count||d.count||0}개를 생성했습니다.`);await loadAll();}
 async function compareCandidates(){if(!['candidates_ready','candidates_testing'].includes(normalizeJob(activeJob)?.status))return alert('후보 생성을 먼저 완료하세요.');const jobId=currentJobId('후보 비교');if(!jobId)return;setBusy(true);try{const d=await api(`/api/ai-lab/jobs/${jobId}/background-start?phase=compare`,{method:'POST'});progress(normalizeJob(d)||activeJob);toast('후보 비교를 서버 백그라운드에서 시작했습니다.');}finally{setBusy(false);}await watchBackground(jobId,'compare');await loadAll();}

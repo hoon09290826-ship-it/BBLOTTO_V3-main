@@ -439,8 +439,20 @@ def ai_lab_job_resume(job_id: int, request: Request, authorization: str | None =
     require_super_admin(admin)
     try:
         with con() as c:
+            before = ai_lab_get_job(c, job_id)
+            previous_phase = str(
+                (before.get('config') or {}).get('last_background_phase')
+                or 'baseline'
+            )
             item = ai_lab_resume_job(c, job_id, created_by=int(admin['id']))
-            previous_phase = str((item.get('config') or {}).get('last_background_phase') or 'baseline')
+            if previous_phase == 'compare' and before.get('status') == 'failed':
+                c.execute(
+                    "UPDATE ai_learning_jobs SET status='candidates_testing',"
+                    "error_message='',completed_at='',updated_at=? WHERE id=?",
+                    (now(), int(job_id)),
+                )
+                c.commit()
+                item = ai_lab_get_job(c, job_id)
             phase = 'compare' if item.get('status') == 'candidates_testing' else previous_phase
             _ai_lab_background_config(c, job_id, phase)
             item = ai_lab_get_job(c, job_id)

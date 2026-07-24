@@ -244,21 +244,93 @@ def _evaluation_cache_key(
 
 
 def _prune_evaluation_cache(c: Any) -> None:
-    total = int(c.execute("SELECT COUNT(*) FROM backtest_evaluation_cache").fetchone()[0])
-    overflow = total - MAX_EVALUATION_CACHE_ROWS
-    if overflow <= 0:
-        return
-    rows = c.execute(
-        "SELECT cache_key FROM backtest_evaluation_cache "
-        "ORDER BY last_used_at,created_at LIMIT ?",
-        (min(5000, overflow),),
-    ).fetchall()
-    for row in rows:
+    c.execute("SAVEPOINT evaluation_cache_prune")
+    try:
+        total = int(c.execute("SELECT COUNT(*) FROM backtest_evaluation_cache").fetchone()[0])
+        overflow = total - MAX_EVALUATION_CACHE_ROWS
+        if overflow > 0:
+            rows = c.execute(
+                "SELECT cache_key FROM backtest_evaluation_cache "
+                "ORDER BY last_used_at,created_at LIMIT ?",
+                (min(5000, overflow),),
+            ).fetchall()
+            for row in rows:
+                c.execute(
+                    "DELETE FROM backtest_evaluation_cache WHERE cache_key=?",
+                    (row["cache_key"],),
+                )
+        c.execute("RELEASE SAVEPOINT evaluation_cache_prune")
+        c.commit()
+    except Exception:
+        c.execute("ROLLBACK TO SAVEPOINT evaluation_cache_prune")
+        c.execute("RELEASE SAVEPOINT evaluation_cache_prune")
+
+
+def _read_evaluation_cache(c: Any, cache_key: str) -> Dict[str, Any]:
+    """Cache failure must never abort the validation transaction."""
+    c.execute("SAVEPOINT evaluation_cache_read")
+    try:
+        row = c.execute(
+            "SELECT result_json FROM backtest_evaluation_cache "
+            "WHERE cache_key=? AND cache_version=?",
+            (cache_key, EVALUATION_CACHE_VERSION),
+        ).fetchone()
+        result = json.loads(row["result_json"] or "{}") if row else {}
+        if result:
+            c.execute(
+                "UPDATE backtest_evaluation_cache SET hit_count=hit_count+1,"
+                "last_used_at=? WHERE cache_key=?",
+                (_now(), cache_key),
+            )
+        c.execute("RELEASE SAVEPOINT evaluation_cache_read")
+        return result if isinstance(result, dict) else {}
+    except Exception:
+        c.execute("ROLLBACK TO SAVEPOINT evaluation_cache_read")
+        c.execute("RELEASE SAVEPOINT evaluation_cache_read")
+        return {}
+
+
+def _write_evaluation_cache(
+    c: Any,
+    *,
+    cache_key: str,
+    validation_profile: str,
+    profile_fingerprint: str,
+    target_round: int,
+    history_fingerprint: str,
+    payload: Dict[str, Any],
+) -> None:
+    c.execute("SAVEPOINT evaluation_cache_write")
+    try:
         c.execute(
-            "DELETE FROM backtest_evaluation_cache WHERE cache_key=?",
-            (row["cache_key"],),
+            "INSERT INTO backtest_evaluation_cache("
+            "cache_key,cache_version,engine_version,backtest_version,"
+            "validation_profile,profile_fingerprint,target_round,"
+            "history_fingerprint,result_json,generation_ms,hit_count,"
+            "created_at,last_used_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(cache_key) DO UPDATE SET "
+            "result_json=excluded.result_json,generation_ms=excluded.generation_ms,"
+            "last_used_at=excluded.last_used_at",
+            (
+                cache_key,
+                EVALUATION_CACHE_VERSION,
+                ENGINE_VERSION,
+                BACKTEST_VERSION,
+                str(validation_profile or "full"),
+                profile_fingerprint,
+                int(target_round),
+                history_fingerprint,
+                json.dumps(payload, ensure_ascii=False),
+                0,
+                0,
+                _now(),
+                _now(),
+            ),
         )
-    c.commit()
+        c.execute("RELEASE SAVEPOINT evaluation_cache_write")
+    except Exception:
+        c.execute("ROLLBACK TO SAVEPOINT evaluation_cache_write")
+        c.execute("RELEASE SAVEPOINT evaluation_cache_write")
 
 
 def load_draws(c: Any) -> List[Dict[str, Any]]:
@@ -449,6 +521,8 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
             else f"profile:{profile_fingerprint}"
         )
         seed = f"{BACKTEST_VERSION}|{seed_identity}|round:{target_round}|mode:{run['mode']}|count:{run['combo_count']}"
+        savepoint = f"backtest_round_{int(target_round)}"
+        c.execute(f"SAVEPOINT {savepoint}")
         try:
             is_cold_start = len(history) == 0
             if not is_cold_start and len(history) < _safe_int(run.get("min_history"), DEFAULT_MIN_HISTORY, minimum=1):
@@ -477,28 +551,13 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
                     validation_profile=validation_profile,
                     profile_fingerprint=profile_fingerprint,
                 )
-                cached_row = c.execute(
-                    "SELECT result_json FROM backtest_evaluation_cache "
-                    "WHERE cache_key=? AND cache_version=?",
-                    (evaluation_key, EVALUATION_CACHE_VERSION),
-                ).fetchone()
-                cached_result = {}
-                if cached_row:
-                    try:
-                        cached_result = json.loads(cached_row["result_json"] or "{}")
-                    except Exception:
-                        cached_result = {}
+                cached_result = _read_evaluation_cache(c, evaluation_key)
                 if cached_result:
                     result = cached_result
                     stats = dict(result.get("engine_stats") or {})
                     stats["persistent_cache_hit"] = True
                     stats["evaluation_cache_version"] = EVALUATION_CACHE_VERSION
                     result["engine_stats"] = stats
-                    c.execute(
-                        "UPDATE backtest_evaluation_cache SET hit_count=hit_count+1,"
-                        "last_used_at=? WHERE cache_key=?",
-                        (_now(), evaluation_key),
-                    )
                 else:
                     cache = build_backtest_cache(history)
                     ensemble_pool_count = min(
@@ -548,33 +607,20 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
                         "engine_stats": result.get("engine_stats", {}),
                         "validation_mode": result.get("validation_mode", "walk_forward"),
                     }
-                    c.execute(
-                        "INSERT INTO backtest_evaluation_cache("
-                        "cache_key,cache_version,engine_version,backtest_version,"
-                        "validation_profile,profile_fingerprint,target_round,"
-                        "history_fingerprint,result_json,generation_ms,hit_count,"
-                        "created_at,last_used_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
-                        "ON CONFLICT(cache_key) DO UPDATE SET "
-                        "result_json=excluded.result_json,generation_ms=excluded.generation_ms,"
-                        "last_used_at=excluded.last_used_at",
-                        (
-                            evaluation_key,
-                            EVALUATION_CACHE_VERSION,
-                            ENGINE_VERSION,
-                            BACKTEST_VERSION,
-                            str(validation_profile or "full"),
-                            profile_fingerprint,
-                            int(target_round),
-                            history_fingerprint,
-                            json.dumps(cached_payload, ensure_ascii=False),
-                            0,
-                            0,
-                            _now(),
-                            _now(),
-                        ),
+                    _write_evaluation_cache(
+                        c,
+                        cache_key=evaluation_key,
+                        validation_profile=validation_profile,
+                        profile_fingerprint=profile_fingerprint,
+                        target_round=int(target_round),
+                        history_fingerprint=history_fingerprint,
+                        payload=cached_payload,
                     )
                 success += 1
+            c.execute(f"RELEASE SAVEPOINT {savepoint}")
         except Exception as exc:
+            c.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+            c.execute(f"RELEASE SAVEPOINT {savepoint}")
             status = "failed"
             error = f"{exc.__class__.__name__}: {exc}"[:1000]
             failed += 1
