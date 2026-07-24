@@ -94,6 +94,12 @@ def backtest_step(run_id: int, step_size: int = 2, authorization: str | None = H
                 _release_work_lock(c, 7501, run_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
+    except Exception as exc:
+        logger.exception('backtest step failed: run_id=%s', run_id)
+        raise HTTPException(
+            500,
+            f'백테스트 #{run_id} 처리 오류({exc.__class__.__name__}): {str(exc)[:300]}',
+        )
     return {'ok': True, 'backtest_version': BACKTEST_VERSION, **result}
 
 
@@ -106,6 +112,12 @@ def backtest_cancel(run_id: int, request: Request, authorization: str | None = H
             run = rc6_cancel_run(c, run_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
+    except Exception as exc:
+        logger.exception('backtest cancel failed: run_id=%s', run_id)
+        raise HTTPException(
+            500,
+            f'백테스트 #{run_id} 중단 오류({exc.__class__.__name__}): {str(exc)[:300]}',
+        )
     log_action(admin, 'BACKTEST_CANCEL', f"전체 회차 백테스트 #{run_id} 중단", request)
     return {'ok': True, 'run': run}
 
@@ -128,6 +140,12 @@ def backtest_run(run_id: int, authorization: str | None = Header(default=None)):
             run = rc6_get_run(c, run_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
+    except Exception as exc:
+        logger.exception('backtest run read failed: run_id=%s', run_id)
+        raise HTTPException(
+            500,
+            f'백테스트 #{run_id} 상태 조회 오류({exc.__class__.__name__}): {str(exc)[:300]}',
+        )
     total = max(1, int(run.get('total_rounds') or 0))
     run['progress_percent'] = round(int(run.get('processed_rounds') or 0) * 100 / total, 2)
     return {'ok': True, 'run': run}

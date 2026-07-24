@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import json
 import math
+import threading
 import time
 from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -17,6 +18,8 @@ MAX_EVALUATION_CACHE_ROWS = 10000
 DEFAULT_COMBO_COUNT = 10
 DEFAULT_MIN_HISTORY = 1
 MAX_STEP_SIZE = 25
+_BACKTEST_SCHEMA_READY = False
+_BACKTEST_SCHEMA_LOCK = threading.Lock()
 
 
 def _now() -> str:
@@ -93,6 +96,17 @@ def _ensure_columns(c: Any, table: str, columns: Dict[str, str]) -> None:
 
 
 def ensure_backtest_tables(c: Any) -> None:
+    global _BACKTEST_SCHEMA_READY
+    if _BACKTEST_SCHEMA_READY:
+        return
+    with _BACKTEST_SCHEMA_LOCK:
+        if _BACKTEST_SCHEMA_READY:
+            return
+        _ensure_backtest_tables_once(c)
+        _BACKTEST_SCHEMA_READY = True
+
+
+def _ensure_backtest_tables_once(c: Any) -> None:
     c.execute(
         "CREATE TABLE IF NOT EXISTS backtest_runs("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT DEFAULT 'ready', "
