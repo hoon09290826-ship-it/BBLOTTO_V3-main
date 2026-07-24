@@ -493,7 +493,7 @@ def _portfolio_adjustment(
         "usage_soft_cap": float(soft_cap),
     }
 
-def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None, *, cache_override: Optional[Dict[str, Any]] = None, deterministic_seed: Optional[str] = None, lab_weight_profile: Optional[Dict[str, Any]] = None):
+def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mode: str = "balanced", member_grade: str = "일반", member_id: Optional[int] = None, *, cache_override: Optional[Dict[str, Any]] = None, deterministic_seed: Optional[str] = None, lab_weight_profile: Optional[Dict[str, Any]] = None, validation_profile: str = "full"):
     started = time.perf_counter()
     target = max(1, min(50, int(count or 10)))
     fixed_nums = _parse_nums(fixed)
@@ -536,7 +536,14 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
     }
     grade_profile = grade_profiles.get(grade_key, grade_profiles["일반"])
     engine_label = {"1등": "AI MASTER", "2등": "AI PREMIUM"}.get(grade_key, "AI BASIC")
-    candidate_target = min(2500, max(int(grade_profile["candidate_floor"]), target * int(grade_profile["candidate_multiplier"])))
+    validation_profile = str(validation_profile or "full").strip().lower()
+    if validation_profile == "screening":
+        candidate_target = min(240, max(80, target * 4))
+    elif validation_profile == "precision":
+        candidate_target = min(480, max(160, target * 8))
+    else:
+        validation_profile = "full"
+        candidate_target = min(2500, max(int(grade_profile["candidate_floor"]), target * int(grade_profile["candidate_multiplier"])))
     pool: Dict[Tuple[int, ...], Tuple[float, Dict[str, Any]]] = {}
     attempts = 0
     while len(pool) < candidate_target and attempts < candidate_target * 5:
@@ -785,6 +792,7 @@ def make_premium_combos(count: int = 10, fixed: Any = "", excluded: Any = "", mo
         "missing_rounds_count": int(cache.get("missing_rounds_count", 0) or 0),
         "member_adaptation": {"enabled": bool(member_profile.get("enabled")), "member_id": int(member_id or 0), "evaluated_runs": int(member_profile.get("evaluated_runs", 0) or 0), "confidence": float(member_profile.get("confidence", 0) or 0), "best_strategy": member_profile.get("best_strategy") or "균형형", "safety": member_profile.get("safety") or {}},
         "methodology": ["AI-01 영구 캐시 기반", "1회차~최신 회차 전체 분석", "최근 10·30·50·100·300회 다중 가중치", "전체 누적 빈도·장기 안정성", "미출현 간격·모멘텀", "최근·전체 동반출현 및 트리플", "홀짝·구간·합계·AC·끝수·연속수", "등급별 전용 가중치·전략 순환", "조합 간 중복 억제", "전략별 포트폴리오 재평가", "번호 반복·구간 편중 동적 보정"],
+        "validation_profile": validation_profile,
     }
     return selected[:target], selected_details[:target], stats
 

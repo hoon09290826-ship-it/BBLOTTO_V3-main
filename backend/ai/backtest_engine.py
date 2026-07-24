@@ -290,7 +290,7 @@ def cancel_run(c: Any, run_id: int) -> Dict[str, Any]:
     return get_run(c, run_id)
 
 
-def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Optional[Dict[str, Any]] = None, profile_label: str = "") -> Dict[str, Any]:
+def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Optional[Dict[str, Any]] = None, profile_label: str = "", validation_profile: str = "full") -> Dict[str, Any]:
     ensure_backtest_tables(c)
     run = _normalize_run(c, run_id, get_run(c, run_id))
     if run["status"] in {"completed", "cancelled"}:
@@ -351,6 +351,7 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
                     cache_override=cache,
                     deterministic_seed=seed,
                     lab_weight_profile=weight_profile,
+                    validation_profile=validation_profile,
                 )
                 combos, details, ensemble_report = select_ensemble_portfolio(
                     combos,
@@ -360,6 +361,7 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
                 stats["ensemble_report"] = ensemble_report
                 stats["ensemble_version"] = ENSEMBLE_VERSION
                 stats["requested_count"] = requested_count
+                stats["validation_profile"] = validation_profile
                 result = _evaluate(combos, details, target)
                 result["recommended_numbers"] = combos
                 result["details"] = details

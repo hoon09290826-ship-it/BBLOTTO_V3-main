@@ -274,6 +274,11 @@ def process_compare_step(
             step_size=max(1, min(25, int(step_size))),
             weight_profile=candidate.get("weights") or {},
             profile_label=f"candidate:{version_id}",
+            validation_profile=(
+                "precision"
+                if result.get("compare_stage") == "precision"
+                else "screening"
+            ),
         )
         return {
             "job": get_job(c, job_id),

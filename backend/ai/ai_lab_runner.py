@@ -177,6 +177,7 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
             step_size=max(1, min(25, safe_int(step_size, 1, minimum=1, maximum=25))),
             weight_profile=(stable.get('weights') or None),
             profile_label=stable_label,
+            validation_profile="precision",
         )
         run = result["run"]
         status = "baseline_completed" if result.get("done") else "running"
@@ -207,6 +208,7 @@ def process_job_step(c: Any, job_id: int, *, step_size: int = 2, created_by: int
                 "by_strategy": by_strategy,
                 "operating_engine_changed": False,
                 "optimizer_executed": False,
+                "validation_profile": "precision",
                 "stable_profile": {
                     "version_id": safe_int(stable.get("version_id"), 0, minimum=0),
                     "version_name": stable.get("version_name") or "",

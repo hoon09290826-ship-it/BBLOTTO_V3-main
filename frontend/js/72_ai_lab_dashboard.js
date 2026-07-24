@@ -47,7 +47,7 @@ function progress(job){
  const stage=activeJob.compare_stage==='precision'?'2차 상위 3개 정밀검증':'1차 최근 300회 선별';
  el('aiLabProgressText').textContent=comparing
   ? `작업 #${activeJob.id} · ${stage} · Candidate ${activeJob.candidate_completed_runs||0}/${activeJob.candidate_run_count||0}개 완료 · 검증 ${activeJob.candidate_processed_rounds||0}/${activeJob.candidate_total_rounds||0}회${err}`
-  : `작업 #${activeJob.id} · ${range} · ${activeJob.processed_rounds||0}/${activeJob.target_rounds||0}회 · ${statusLabel[activeJob.status]||activeJob.status}${err}`;
+  : `작업 #${activeJob.id} · ${range} · 고속 정밀 검증 · ${activeJob.processed_rounds||0}/${activeJob.target_rounds||0}회 · ${statusLabel[activeJob.status]||activeJob.status}${err}`;
  badge(statusLabel[activeJob.status]||activeJob.status||'대기');syncButtons();
 }
 function renderStable(item){if(!item||!Object.keys(item).length){el('aiLabStable').textContent='Stable 엔진 정보를 찾을 수 없습니다. 기존 기본 엔진으로 안전 동작합니다.';return;}const m=item.metrics||{};el('aiLabStable').innerHTML=`<div class="ai-lab-stable-card"><div><small>현재 운영 Stable</small><b>${esc(item.version_name||('#'+(item.version_id||item.id)))}</b><span>${esc(item.profile_name||'기본 프로필')}</span></div><div><small>엔진 코드</small><b>${esc(item.engine_code_version||'-')}</b><span>평균 최고일치 ${fmt(m.avg_best_match||m.score,2)}</span></div><div><small>상태</small><b class="positive">운영 중</b><span>관리자 승인 전 자동 변경 없음</span></div></div>`;}
