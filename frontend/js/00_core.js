@@ -614,10 +614,12 @@ function renderVerificationProof(proof){
     excluded_numbers_absent:'제외수 미포함',
     details_match_final_numbers:'화면 번호·분석 일치',
     six_number_evidence_rows:'번호별 계산근거 6개',
+    ensemble_trace_complete:'앙상블 5모델 근거 연결',
     full_history_confirmed:'전체 이력 분석',
     history_has_no_missing_rounds:'누락 회차 없음'
   };
   const lab=proof.validation_linkage||{};
+  const ensemble=proof.ensemble_report||{};
   const comboRows=(proof.combo_proofs||[]).map(row=>{
     const evidence=(row.number_evidence||[])
       .map(item=>`${item.number}(${item.role||'-'}·${item.selection_score??'-'})`)
@@ -629,6 +631,7 @@ function renderVerificationProof(proof){
     <div class="verification-body">
       <div class="verification-scope"><span><b>${esc(range)}</b><small>분석 회차</small></span><span><b>${esc(scope.draw_count??'-')}</b><small>학습 회차</small></span><span><b>${esc(scope.candidate_count??'-')}</b><small>검토 후보</small></span><span><b>${esc(proof.selected_count??'-')}</b><small>최종 선별</small></span></div>
       <p>생성 번호와 계산 근거를 SHA-256 검증 ID로 묶었습니다. 번호·근거·엔진·데이터 범위 중 하나라도 달라지면 ID도 달라집니다.</p>
+      <p>앙상블 선별: Stable 후보 ${esc(ensemble.candidate_portfolio_count??'-')}개 → 최종 ${esc(ensemble.selected_count??proof.selected_count??'-')}개 · 5모델 합의 · 최종 최대 중복 ${esc(ensemble.max_final_overlap??'-')}개</p>
       <p>AI LAB 연결: ${lab.ai_lab_profile_applied?'Stable 가중치 적용':'운영 Stable 기준'} · 버전 ${esc(lab.ai_lab_stable_version_id||'-')} · 백테스트 작업 ${esc(lab.ai_lab_backtest_run_id||'-')} · ${esc(lab.method||'')}</p>
       <div class="verification-checks">${checks.map(([key,value])=>`<span class="${value?'ok':'bad'}">${value?'✓':'!'} ${esc(labels[key]||key)}</span>`).join('')}</div>
       <div class="verification-factors">${(proof.factor_groups||[]).map(x=>`<span>${esc(x)}</span>`).join('')}</div>

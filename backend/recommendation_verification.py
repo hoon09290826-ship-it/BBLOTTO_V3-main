@@ -114,6 +114,11 @@ def build_generation_verification(
             "repeat_penalty": detail.get("diversity_penalty") or trace.get("number_repeat_penalty"),
             "overlap_penalty": detail.get("overlap_penalty") or trace.get("combo_overlap_penalty"),
             "max_previous_overlap": detail.get("max_previous_overlap") or trace.get("max_previous_overlap"),
+            "ensemble_version": detail.get("ensemble_version"),
+            "ensemble_score": detail.get("ensemble_score"),
+            "ensemble_votes": detail.get("ensemble_votes"),
+            "ensemble_candidate_rank": detail.get("ensemble_candidate_rank"),
+            "ensemble_components": detail.get("ensemble_components") or {},
             "number_evidence": evidence,
         })
 
@@ -133,6 +138,12 @@ def build_generation_verification(
         ),
         "details_match_final_numbers": aligned,
         "six_number_evidence_rows": evidence_complete,
+        "ensemble_trace_complete": bool(normalized) and all(
+            isinstance(detail_rows[index].get("ensemble_components"), dict)
+            and len(detail_rows[index].get("ensemble_components") or {}) == 5
+            and detail_rows[index].get("ensemble_score") is not None
+            for index in range(min(len(normalized), len(detail_rows)))
+        ) and len(normalized) == len(detail_rows),
         "full_history_confirmed": bool(
             stats.get("is_full_history") or stats.get("full_history")
         ),
@@ -165,6 +176,7 @@ def build_generation_verification(
         "excluded_numbers": sorted(excluded_set),
         "data_scope": scope,
         "methodology": list(stats.get("methodology") or []),
+        "ensemble_report": engine.get("ensemble_report") or {},
         "combo_proofs": combo_proofs,
         "validations": validations,
     }
@@ -202,5 +214,6 @@ def build_generation_verification(
             "홀짝·구간·합계·AC",
             "조합 중복·번호 반복 억제",
             "회원·AI LAB 가중치",
+            "5모델 앙상블 합의·포트폴리오 재선별",
         ],
     }

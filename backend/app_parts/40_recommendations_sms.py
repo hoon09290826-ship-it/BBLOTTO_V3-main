@@ -1,4 +1,5 @@
 from .ai.ai_lab_activation import load_stable_profile as ai_lab_load_stable_profile
+from .recommendation_ensemble import select_ensemble_portfolio
 from .recommendation_verification import build_generation_verification
 # Extracted from legacy backend/app.py lines 2873-3075.
 @router.post('/api/generate')
@@ -27,7 +28,18 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     _latest_for_generation = int((latest_stats(1) or {}).get('latest_round') or 0)
     safe_round=max(1, int(req.round_no or (_latest_for_generation + 1 if _latest_for_generation else expected_lotto_round())))
     safe_mode=req.mode or 'balanced'
-    combos, details, st = make_premium_combos(safe_count, req.fixed, excluded_value, safe_mode, member_grade, member_id=member_id, lab_weight_profile=(stable_lab.get('weights') or None))
+    ensemble_pool_count=min(50,max(safe_count,min(safe_count*2,safe_count+12)))
+    combos, details, st = make_premium_combos(ensemble_pool_count, req.fixed, excluded_value, safe_mode, member_grade, member_id=member_id, lab_weight_profile=(stable_lab.get('weights') or None))
+    combos, details, ensemble_report = select_ensemble_portfolio(
+        combos, details, safe_count
+    )
+    st['ensemble_report']=ensemble_report
+    st['ensemble_pool_count']=ensemble_pool_count
+    st['requested_count']=safe_count
+    st['methodology']=list(st.get('methodology') or [])+[
+        'Stable 후보군 5모델 앙상블 합의',
+        '앙상블 재선별 시 번호 반복·조합 중복·전략 편중 동시 억제',
+    ]
     # RC7-1: 회원별 AI 엔진 V2 문구/번호 분산용 회원 시드 정보
     try:
         st['member_id'] = member_id or 0
@@ -63,6 +75,7 @@ def generate(req:GenerateReq, request:Request, authorization: str|None = Header(
     engine['ai_lab_profile_name']=stable_lab.get('profile_name') or ''
     engine['ai_lab_profile_applied']=bool(stable_lab.get('weights'))
     engine['ai_lab_backtest_run_id']=int(stable_lab.get('backtest_run_id') or 0)
+    engine['ensemble_report']=ensemble_report
     recommendation_analysis=analysis
     engine['member_grade']=member_grade
     engine['grade_strength']=rc45_grade_strength_text(member_grade)

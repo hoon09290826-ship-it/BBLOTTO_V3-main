@@ -7,9 +7,10 @@ import time
 from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from ..recommendation_ensemble import ENSEMBLE_VERSION, select_ensemble_portfolio
 from ..recommendation_engine import ENGINE_VERSION, build_backtest_cache, make_premium_combos
 
-BACKTEST_VERSION = "BBLOTTO_BACKTEST_RC6_D7_COLDSTART"
+BACKTEST_VERSION = "BBLOTTO_BACKTEST_RC6_D8_ENSEMBLE_WALKFORWARD"
 DEFAULT_COMBO_COUNT = 10
 DEFAULT_MIN_HISTORY = 1
 MAX_STEP_SIZE = 25
@@ -330,14 +331,35 @@ def process_step(c: Any, run_id: int, step_size: int = 2, *, weight_profile: Opt
                 # build_backtest_cache([]) returns neutral/equal historical
                 # features, and the deterministic seed contains no winning data.
                 cache = build_backtest_cache(history)
+                requested_count = _safe_int(
+                    run.get("combo_count"),
+                    DEFAULT_COMBO_COUNT,
+                    minimum=1,
+                    maximum=50,
+                )
+                ensemble_pool_count = min(
+                    50,
+                    max(
+                        requested_count,
+                        min(requested_count * 2, requested_count + 12),
+                    ),
+                )
                 combos, details, stats = make_premium_combos(
-                    _safe_int(run.get("combo_count"), DEFAULT_COMBO_COUNT, minimum=1, maximum=50),
+                    ensemble_pool_count,
                     mode=run["mode"],
                     member_grade="일반",
                     cache_override=cache,
                     deterministic_seed=seed,
                     lab_weight_profile=weight_profile,
                 )
+                combos, details, ensemble_report = select_ensemble_portfolio(
+                    combos,
+                    details,
+                    requested_count,
+                )
+                stats["ensemble_report"] = ensemble_report
+                stats["ensemble_version"] = ENSEMBLE_VERSION
+                stats["requested_count"] = requested_count
                 result = _evaluate(combos, details, target)
                 result["recommended_numbers"] = combos
                 result["details"] = details
